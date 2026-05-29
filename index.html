@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineSyncTV Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    
+    <style>
+        body { background-color: #121212; padding-bottom: 50px; }
+        .log-box { height: 200px; overflow-y: auto; background: #1e1e1e; font-family: monospace; font-size: 0.85rem; }
+        .peer-box { height: 200px; overflow-y: auto; background: #1e1e1e; }
+        .card { margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .btn-transport { width: 100%; margin-bottom: 10px; }
+        .plyr { border-radius: 8px; border: 1px solid #6c757d; aspect-ratio: 16/9; }
+        .seek-input { max-width: 70px; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div class="container mt-4">
+    <header class="mb-4 pb-3 border-bottom d-flex justify-content-between align-items-center">
+        <h2 class="m-0 text-primary">CineSyncTV <span class="text-light">Admin Panel</span></h2>
+        <span id="connectionStatus" class="badge bg-danger">Disconnected</span>
+    </header>
+
+    <div class="row">
+        <div class="col-md-7">
+            
+            <div class="card">
+                <div class="card-header bg-dark text-white">1. Connection</div>
+                <div class="card-body">
+                    <div class="input-group">
+                        <span class="input-group-text">Room ID</span>
+                        <input type="text" id="roomIdInput" class="form-control" value="movie_room_1">
+                        <button class="btn btn-primary" id="btnConnect">Connect</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <span>2. Media Linker & Settings</span>
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="previewToggle" checked>
+                        <label class="form-check-label text-info small fw-bold" for="previewToggle">Live Preview Player</label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    
+                    <div class="mb-3 p-3 border rounded border-secondary">
+                        <label class="form-label text-warning fw-bold">Playback Mode</label>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="playbackMode" id="modeCache" value="cache" checked>
+                            <label class="form-check-label" for="modeCache">Download First & Sync (VOD / MP4)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="playbackMode" id="modeLive" value="live">
+                            <label class="form-check-label" for="modeLive">Direct Stream (Live HLS / Cache Bypass)</label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Video URL</label>
+                        <div class="input-group">
+                            <input type="text" id="mediaUrl" class="form-control" value="https://server.com/movie.mp4">
+                            <button class="btn btn-outline-info" id="btnLoadPreview">Load Preview</button>
+                        </div>
+                    </div>
+
+                    <div id="previewContainer" class="mb-4 bg-dark rounded shadow-sm">
+                        <video id="adminPreview" playsinline controls></video>
+                    </div>
+
+                    <div id="manualDurationContainer" class="mb-4 p-3 border border-warning rounded d-none">
+                        <label class="form-label text-warning small fw-bold">Preview Disabled: Enter Expected Runtime</label>
+                        <div class="input-group">
+                            <input type="number" id="manualDuration" class="form-control" placeholder="e.g. 120" value="120">
+                            <span class="input-group-text">Minutes</span>
+                        </div>
+                        <div class="form-text">Used to calculate the planned break timestamps for the TVs.</div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label class="form-label">Title</label>
+                            <input type="text" id="mediaTitle" class="form-control" value="Interstellar">
+                        </div>
+                        <div class="col">
+                            <label class="form-label">Planned Breaks</label>
+                            <input type="number" id="mediaTimestops" class="form-control" value="3">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" id="mediaDesc" class="form-control" value="A team of explorers travel through a wormhole...">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Raw SRT Content</label>
+                        <textarea id="mediaSrt" class="form-control" rows="2">1&#10;00:00:01,000 --> 00:00:04,000&#10;Welcome to CineSyncTV.</textarea>
+                    </div>
+                    <button class="btn btn-success w-100 fw-bold" id="btnPushContext">Push to TVs (storeContext)</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-dark text-white">3. Master Transport Controls</div>
+                <div class="card-body">
+                    <button class="btn btn-primary btn-transport btn-lg fw-bold mb-3" id="btnStream">📡 Stream (Start Show)</button>
+                    
+                    <div class="row">
+                        <div class="col-6"><button class="btn btn-outline-light btn-transport" id="btnPlay">▶ Play</button></div>
+                        <div class="col-6"><button class="btn btn-outline-light btn-transport" id="btnPause">⏸ Pause</button></div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6"><button class="btn btn-outline-secondary btn-transport" id="btnRewind">⏪ -10s</button></div>
+                        <div class="col-6"><button class="btn btn-outline-secondary btn-transport" id="btnSkip">⏭ +10s</button></div>
+                    </div>
+                    
+                    <hr class="border-secondary">
+                    
+                    <div class="row align-items-end mb-3">
+                        <div class="col">
+                            <label class="form-label small text-muted">Manual Seek (HH : MM : SS)</label>
+                            <div class="input-group">
+                                <input type="number" id="seekHr" class="form-control seek-input bg-dark text-white border-secondary" placeholder="HH" min="0">
+                                <span class="input-group-text bg-dark text-white border-secondary border-start-0 border-end-0">:</span>
+                                <input type="number" id="seekMin" class="form-control seek-input bg-dark text-white border-secondary" placeholder="MM" min="0" max="59">
+                                <span class="input-group-text bg-dark text-white border-secondary border-start-0 border-end-0">:</span>
+                                <input type="number" id="seekSec" class="form-control seek-input bg-dark text-white border-secondary" placeholder="SS" min="0" max="59">
+                                <button class="btn btn-outline-warning fw-bold px-4" id="btnManualSeek">Seek</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <p class="text-muted small mb-2">Pause the room and snap everyone to a specific timestamp:</p>
+                    <button class="btn btn-warning w-100 fw-bold text-dark" id="btnForceSync">🔄 Force Sync All TVs</button>
+                </div>
+            </div>
+
+        </div>
+
+        <div class="col-md-5">
+            <div class="card">
+                <div class="card-header bg-dark text-white d-flex justify-content-between">
+                    <span>Peer Dashboard</span>
+                    <span id="peerCount" class="badge bg-secondary">0 Clients</span>
+                </div>
+                <div class="card-body p-0">
+                    <ul class="list-group list-group-flush peer-box" id="peerList">
+                        <li class="list-group-item text-muted text-center mt-3 border-0">Waiting for peers...</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header bg-dark text-white">Network Event Log</div>
+                <div class="card-body p-0">
+                    <div class="log-box p-3" id="eventLog"></div>
+                </div>
+                <div class="card-footer p-1">
+                    <button class="btn btn-sm btn-outline-danger w-100" onclick="document.getElementById('eventLog').innerHTML=''">Clear Logs</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Configuration
+    const SOCKET_URL = "https://socket.elvistony.dev"; 
+    let socket = null;
+    let currentRoom = "";
+    let knownPeers = {}; 
+
+    // UI Elements
+    const statusBadge = document.getElementById('connectionStatus');
+    const logBox = document.getElementById('eventLog');
+    const peerList = document.getElementById('peerList');
+    const peerCount = document.getElementById('peerCount');
+    const previewToggle = document.getElementById('previewToggle');
+
+    // Reflection Latch
+    let isNetworkEvent = false;
+
+    // Initialize Plyr.js
+    const videoElement = document.getElementById('adminPreview');
+    const player = new Plyr(videoElement, {
+        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen'],
+        muted: true 
+    });
+    let hlsInstance = null;
+
+    // -------------------------------------------------------------------
+    // UI TOGGLES
+    // -------------------------------------------------------------------
+    previewToggle.addEventListener('change', (e) => {
+        const isPreviewOn = e.target.checked;
+        if(isPreviewOn) {
+            document.getElementById('previewContainer').classList.remove('d-none');
+            document.getElementById('manualDurationContainer').classList.add('d-none');
+            document.getElementById('btnLoadPreview').disabled = false;
+        } else {
+            document.getElementById('previewContainer').classList.add('d-none');
+            document.getElementById('manualDurationContainer').classList.remove('d-none');
+            document.getElementById('btnLoadPreview').disabled = true;
+            // Stop preview safely
+            isNetworkEvent = true;
+            player.pause();
+            setTimeout(() => isNetworkEvent = false, 100);
+        }
+    });
+
+    document.getElementById('btnLoadPreview').addEventListener('click', () => {
+        const url = document.getElementById('mediaUrl').value;
+        if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+        
+        if (url.includes('.m3u8')) {
+            if (Hls.isSupported()) {
+                hlsInstance = new Hls();
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(videoElement);
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                videoElement.src = url;
+            }
+        } else {
+            videoElement.src = url;
+        }
+    });
+
+    // Plyr Event Listeners for Bi-Directional Sync
+    player.on('play', () => { if (!isNetworkEvent) emitCommand('play'); });
+    player.on('pause', () => { if (!isNetworkEvent) emitCommand('pause'); });
+    player.on('seeked', () => { if (!isNetworkEvent) emitCommand('seek', Math.floor(player.currentTime)); });
+
+    function logEvent(direction, eventName, payload) {
+        const time = new Date().toLocaleTimeString();
+        let color = direction === 'OUT' ? 'text-info' : direction === 'IN' ? 'text-warning' : 'text-success';
+        const html = `
+            <div class="mb-2 border-bottom border-secondary pb-1">
+                <span class="text-muted">[${time}]</span> 
+                <span class="${color} fw-bold">${direction} &rarr; ${eventName}</span><br>
+                <span class="text-light" style="word-break: break-all;">${JSON.stringify(payload)}</span>
+            </div>
+        `;
+        logBox.insertAdjacentHTML('afterbegin', html);
+    }
+
+    function renderPeers(totalCount) {
+        peerList.innerHTML = '';
+        const keys = Object.keys(knownPeers);
+        const displayCount = totalCount !== undefined ? totalCount : keys.length;
+        peerCount.innerText = `${displayCount} Clients`;
+        
+        if(keys.length === 0) {
+            peerList.innerHTML = '<li class="list-group-item text-muted text-center mt-3 border-0">No other clients in room.</li>';
+            return;
+        }
+
+        keys.forEach(id => {
+            const data = knownPeers[id];
+            let badgeClass = "bg-secondary";
+            if (data.isStalled) badgeClass = "bg-danger";
+            else if (data.progress === 100 || data.state === "READY" || data.state === "LOADING...") badgeClass = "bg-success";
+            else if (data.progress > 0) badgeClass = "bg-warning text-dark";
+
+            const li = document.createElement('li');
+            li.className = "list-group-item d-flex justify-content-between align-items-center bg-transparent text-light";
+            li.innerHTML = `
+                <span title="${id}">📺 Client: ${id.substring(0,6)}...</span>
+                <span class="badge ${badgeClass} rounded-pill">${data.state}</span>
+            `;
+            peerList.appendChild(li);
+        });
+    }
+
+    // Connect & Join Room
+    document.getElementById('btnConnect').addEventListener('click', () => {
+        const roomId = document.getElementById('roomIdInput').value.trim();
+        if(!roomId) return alert("Please enter a Room ID");
+
+        if(socket) socket.disconnect();
+        socket = io(SOCKET_URL);
+        currentRoom = roomId;
+
+        socket.on('connect', () => {
+            statusBadge.innerText = "Connected";
+            statusBadge.className = "badge bg-success";
+            socket.emit('join', currentRoom);
+            logEvent('OUT', 'join', currentRoom);
+        });
+
+        socket.on('disconnect', () => {
+            statusBadge.innerText = "Disconnected";
+            statusBadge.className = "badge bg-danger";
+            knownPeers = {};
+            renderPeers(0);
+        });
+
+        socket.on('welcome', (data) => {
+            logEvent('IN', 'welcome', data);
+            renderPeers(data.msg.count);
+            if (data.msg.context && typeof data.msg.context === 'object') {
+                const ctx = data.msg.context;
+                if (ctx.url) document.getElementById('mediaUrl').value = ctx.url;
+                if (ctx.title) document.getElementById('mediaTitle').value = ctx.title;
+                if (ctx.isLive !== undefined) {
+                    if (ctx.isLive) document.getElementById('modeLive').checked = true;
+                    else document.getElementById('modeCache').checked = true;
+                }
+            }
+        });
+
+        socket.on('roomupdate', (data) => {
+            logEvent('IN', 'roomupdate', data);
+            const { type, id, count } = data.msg;
+            if (type === 'new-client') knownPeers[id] = { progress: 0, state: "Connected", isStalled: false };
+            else if (type === 'left-client') delete knownPeers[id];
+            renderPeers(count);
+        });
+
+        socket.on('message', (data) => {
+            logEvent('IN', 'message', data);
+            const senderId = data.from;
+            const msgType = data.msg?.type;
+            
+            if (senderId === socket.id || senderId === 'system') return;
+
+            if (!knownPeers[senderId] && msgType) {
+                knownPeers[senderId] = { progress: 0, state: "Recovered...", isStalled: false };
+            }
+
+            if (previewToggle.checked) {
+                if (msgType === 'play') {
+                    isNetworkEvent = true;
+                    player.play().catch(e => console.log(e)).finally(() => isNetworkEvent = false);
+                } 
+                else if (msgType === 'pause') {
+                    isNetworkEvent = true;
+                    player.pause();
+                    setTimeout(() => isNetworkEvent = false, 100);
+                } 
+                else if (msgType === 'seek') {
+                    isNetworkEvent = true;
+                    const seekTo = parseInt(data.msg.payload);
+                    if(!isNaN(seekTo)) player.currentTime = seekTo;
+                    setTimeout(() => isNetworkEvent = false, 100);
+                }
+            }
+            
+            if (msgType === 'progress' && knownPeers[senderId]) {
+                const percent = parseInt(data.msg.payload);
+                if(!isNaN(percent)) {
+                    knownPeers[senderId].progress = percent;
+                    if (!knownPeers[senderId].isStalled) knownPeers[senderId].state = percent === 100 ? "READY" : `${percent}%`;
+                    renderPeers();
+                }
+            } 
+            else if (msgType === 'stalled' && knownPeers[senderId]) {
+                knownPeers[senderId].state = "BUFFERING...";
+                knownPeers[senderId].isStalled = true;
+                renderPeers();
+            }
+            else if (msgType === 'recovered' && knownPeers[senderId]) {
+                knownPeers[senderId].isStalled = false;
+                knownPeers[senderId].state = knownPeers[senderId].progress === 100 ? "READY" : `${knownPeers[senderId].progress}%`;
+                renderPeers();
+            }
+        });
+    });
+
+    document.getElementById('btnPushContext').addEventListener('click', () => {
+        if(!socket || !socket.connected) return alert("Connect first!");
+        
+        const urlValue = document.getElementById('mediaUrl').value;
+        const isLiveStream = document.getElementById('modeLive').checked;
+        const isPreviewOn = previewToggle.checked;
+        const numBreaks = parseInt(document.getElementById('mediaTimestops').value) || 0;
+        
+        let durSecs = 0;
+        if (isPreviewOn && player.duration) {
+            durSecs = player.duration;
+        } else {
+            durSecs = (parseFloat(document.getElementById('manualDuration').value) || 0) * 60;
+        }
+        
+        let computedTimestops = [];
+        if (durSecs > 0 && numBreaks > 0) {
+            const interval = durSecs / (numBreaks + 1);
+            for(let i=1; i<=numBreaks; i++) computedTimestops.push(Math.floor(interval * i * 1000));
+        }
+        
+        const contextData = {
+            url: urlValue,
+            title: document.getElementById('mediaTitle').value,
+            desc: document.getElementById('mediaDesc').value,
+            timestops: computedTimestops, 
+            isLive: isLiveStream
+        };
+
+        socket.emit('storeContext', { roomId: currentRoom, context: contextData });
+        logEvent('OUT', 'storeContext', contextData);
+        
+        Object.keys(knownPeers).forEach(id => {
+            knownPeers[id].state = isLiveStream ? "LOADING..." : "0%";
+            knownPeers[id].progress = 0;
+            knownPeers[id].isStalled = false;
+        });
+        renderPeers();
+    });
+
+    function emitCommand(type, cmdPayload = null) {
+        if(!socket || !socket.connected) return;
+        if (isNetworkEvent) return; 
+        const payload = { room: currentRoom, msg: { type: type, payload: cmdPayload } };
+        socket.emit('message', payload);
+        logEvent('OUT', 'message', payload);
+    }
+
+    // Helper: Calculate seconds from HH:MM:SS
+    function getManualSeekSeconds() {
+        const hr = parseInt(document.getElementById('seekHr').value) || 0;
+        const min = parseInt(document.getElementById('seekMin').value) || 0;
+        const sec = parseInt(document.getElementById('seekSec').value) || 0;
+        return (hr * 3600) + (min * 60) + sec;
+    }
+
+    document.getElementById('btnStream').addEventListener('click', () => {
+        if(previewToggle.checked) { player.currentTime = 0; player.play(); }
+        emitCommand('stream');
+    });
+    
+    document.getElementById('btnPlay').addEventListener('click', () => {
+        if(previewToggle.checked) player.play();
+        emitCommand('play');
+    });
+    
+    document.getElementById('btnPause').addEventListener('click', () => {
+        if(previewToggle.checked) player.pause();
+        emitCommand('pause');
+    });
+    
+    document.getElementById('btnSkip').addEventListener('click', () => {
+        if(previewToggle.checked) {
+            const targetTime = player.currentTime + 10;
+            // Emit BEFORE setting latch to ensure it sends
+            emitCommand('seek', Math.floor(targetTime));
+            isNetworkEvent = true;
+            player.currentTime = targetTime;
+            setTimeout(() => isNetworkEvent = false, 100);
+        } else {
+            logEvent('SYS', 'SKIP', 'Requires Live Preview OR use Manual Seek.');
+        }
+    });
+    
+    document.getElementById('btnRewind').addEventListener('click', () => {
+        if(previewToggle.checked) {
+            const targetTime = Math.max(0, player.currentTime - 10);
+            emitCommand('seek', Math.floor(targetTime));
+            isNetworkEvent = true;
+            player.currentTime = targetTime;
+            setTimeout(() => isNetworkEvent = false, 100);
+        } else {
+            logEvent('SYS', 'REWIND', 'Requires Live Preview OR use Manual Seek.');
+        }
+    });
+
+    // MANUAL SEEK
+    document.getElementById('btnManualSeek').addEventListener('click', () => {
+        const seekVal = getManualSeekSeconds();
+        
+        // Emit BEFORE latching to guarantee delivery
+        emitCommand('seek', seekVal);
+
+        if(previewToggle.checked) {
+            isNetworkEvent = true;
+            player.currentTime = seekVal;
+            setTimeout(() => isNetworkEvent = false, 100);
+        }
+    });
+
+    // FORCE SYNC
+    document.getElementById('btnForceSync').addEventListener('click', () => {
+        if(!socket || !socket.connected) return alert("Connect first!");
+        
+        let currentT = 0;
+        if (previewToggle.checked) {
+            currentT = Math.floor(player.currentTime);
+            // Emit BEFORE setting latch
+            emitCommand('pause');
+            emitCommand('seek', currentT);
+
+            isNetworkEvent = true; 
+            player.pause();
+            setTimeout(() => isNetworkEvent = false, 100);
+        } else {
+            currentT = getManualSeekSeconds();
+            emitCommand('pause');
+            emitCommand('seek', currentT);
+        }
+
+        logEvent('SYS', 'FORCE SYNC', `Room paused and synced to ${formatTime(currentT)}. Await buffering, then press Play.`);
+    });
+
+</script>
+</body>
+</html>
