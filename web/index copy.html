@@ -152,13 +152,6 @@
         const roomId = document.getElementById('roomIdInput').value.trim();
         if(!roomId) return alert("Please enter a Room ID");
 
-        // CRITICAL iOS FIX 1: The "Unlock" Trick
-        // We use the user's physical click on the Connect button to unlock the media engine.
-        // This allows the Admin's remote WebSocket commands to successfully play audio later.
-        player.play().catch(() => {}).finally(() => {
-            player.pause();
-        });
-
         currentRoom = roomId;
         socket = io(SOCKET_URL);
 
@@ -167,7 +160,6 @@
             statusBadge.className = "badge bg-success shadow";
             socket.emit('join', currentRoom);
             
-            // Switch UI
             wizardScreen.style.display = "none";
             playerScreen.style.display = "flex";
         });
@@ -204,51 +196,38 @@
 
         if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
         
-        // HLS Support
         if (url.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 hlsInstance = new Hls();
                 hlsInstance.loadSource(url);
                 hlsInstance.attachMedia(videoElement);
             } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-                // Native Apple Support (iOS Safari)
                 videoElement.src = url;
-                // CRITICAL iOS FIX 2: Kickstart the manifest fetch
-                videoElement.load(); 
             }
         } else {
-            // Standard MP4
             videoElement.src = url;
-            // CRITICAL iOS FIX 2: Kickstart the fetch
-            videoElement.load();
         }
 
-        // Report 100% ready to admin once metadata loads
         videoElement.addEventListener('loadedmetadata', () => {
-            if(socket) {
-                socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
-            }
+            if(socket) socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
         }, { once: true });
     }
 
     // ---------------------------------------------------------
-    // 3. NETWORK MESSAGE HANDLING (Listening to Admin)
+    // 3. NETWORK MESSAGE HANDLING
     // ---------------------------------------------------------
     function handleNetworkMessage(data) {
         const senderId = data.from;
         const msgType = data.msg?.type;
         
-        // Ignore our own echoes
-        if (senderId === socket.id || senderId === 'system') return;
+        if (senderId === socket.id) return;
 
+        // NEW LOGIC: Seek and Stream explicitly halt playback for buffering
         if (msgType === 'stream') {
             isNetworkEvent = true;
             player.currentTime = 0;
-            // CRITICAL iOS FIX 3: Briefly tap play then pause to force iOS to buffer the first frame
-            player.play().catch(()=>{}).finally(() => {
-                player.pause();
-                setTimeout(() => isNetworkEvent = false, 100);
-            });
+            player.pause(); 
+            setTimeout(() => isNetworkEvent = false, 100);
         } 
         else if (msgType === 'play') {
             isNetworkEvent = true;
@@ -271,18 +250,17 @@
     }
 
     // ---------------------------------------------------------
-    // 4. CLIENT STATUS REPORTING (Talking to Admin)
+    // 4. CLIENT STATUS REPORTING
     // ---------------------------------------------------------
     function emitCommand(type, cmdPayload = null) {
         if(!socket || !socket.connected || isNetworkEvent) return;
         socket.emit('message', { room: currentRoom, msg: { type: type, payload: cmdPayload } });
     }
 
-    // Let web client broadcast play/pause/seek just like TV remotes
     player.on('play', () => emitCommand('play'));
     player.on('pause', () => emitCommand('pause'));
     
-    // Stop playback immediately after scrubbing to allow buffering
+    // NEW: Stop playback immediately after scrubbing to allow buffering
     player.on('seeked', () => { 
         if (!isNetworkEvent) {
             isNetworkEvent = true;
@@ -292,7 +270,6 @@
         }
     });
 
-    // Buffering Trackers
     player.on('waiting', () => {
         if (!isStalled && socket) {
             isStalled = true;
@@ -307,7 +284,6 @@
         }
     });
 
-    // Routine Progress Heartbeat (Every 5 seconds)
     setInterval(() => {
         if(socket && socket.connected && player.playing && player.duration) {
             socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
