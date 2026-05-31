@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CineSyncTV Web Client</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    
+    <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-dark@4/dark.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
+    
+    <style>
+        :root {
+            --cine-bg: #0A0A0C;
+            --cine-orange: #FF9100;
+            --cine-card: #1C1C1E;
+            --plyr-color-main: #FF9100;
+        }
+
+        body { 
+            background-color: var(--cine-bg); 
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+        
+        /* Wizard Screen Styling */
+        #wizardScreen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex-grow: 1;
+        }
+        .wizard-card {
+            background-color: var(--cine-card);
+            padding: 2rem;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        /* Player Screen Styling */
+        #playerScreen {
+            display: none;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .player-header {
+            padding: 1rem;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .plyr-container {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+        }
+        .plyr { width: 100%; height: 100%; max-height: 100vh; }
+        
+        /* --- PLYR SETTINGS MENU SCROLL FIX --- */
+        .plyr__menu__container [role="menu"] {
+            max-height: 300px; 
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .plyr__menu__container [role="menu"]::-webkit-scrollbar { width: 6px; }
+        .plyr__menu__container [role="menu"]::-webkit-scrollbar-track { background: transparent; }
+        .plyr__menu__container [role="menu"]::-webkit-scrollbar-thumb {
+            background-color: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+        }
+        .plyr__menu__container [role="menu"]::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.5); }
+        /* ------------------------------------- */
+
+        /* --- PREMIUM CINEMATIC SUBTITLE STYLING --- */
+        ::cue {
+            color: #ffffff;
+            background-color: rgba(0, 0, 0, 0.65) !important; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 1.5rem;
+            font-weight: 500;
+            text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.9);
+            line-height: 1.4;
+            padding: 4px 12px;
+        }
+        .plyr__captions .plyr__caption {
+            color: #ffffff;
+            background-color: rgba(0, 0, 0, 0.65);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 1.5rem;
+            font-weight: 500;
+            text-shadow: 0px 2px 4px rgba(0, 0, 0, 0.9);
+            line-height: 1.4;
+            padding: 4px 12px;
+            border-radius: 4px;
+        }
+
+        /* Input styling */
+        .cine-input {
+            background-color: #333;
+            border: 1px solid #444;
+            color: white;
+            letter-spacing: 2px;
+        }
+        .cine-input:focus {
+            background-color: #444;
+            border-color: var(--cine-orange);
+            color: white;
+            box-shadow: none;
+        }
+        .btn-cine {
+            background-color: var(--cine-orange);
+            color: var(--cine-bg);
+            font-weight: bold;
+            border: none;
+        }
+        .btn-cine:hover { background-color: #e68200; color: var(--cine-bg); }
+        
+        #statusBadge { position: fixed; top: 15px; right: 15px; z-index: 9999; }
+        .swal2-popup { border: 1px solid #333; border-radius: 16px; }
+    </style>
+</head>
+<body>
+
+<span id="statusBadge" class="badge bg-danger shadow">Disconnected</span>
+
+<div id="wizardScreen">
+    <div class="text-center mb-4">
+        <h1 class="fw-black" style="color: var(--cine-orange); font-weight: 900;">CineSync TV</h1>
+        <p class="text-muted">Web Client 1.0</p>
+    </div>
+    <div class="wizard-card">
+        <h5 class="mb-3 text-white fw-bold text-center">Join a Watch Party</h5>
+        <div class="mb-4">
+            <input type="text" id="roomIdInput" class="form-control cine-input form-control-lg text-center" placeholder="Enter Room ID">
+        </div>
+        <button id="btnConnect" class="btn btn-cine btn-lg w-100 mb-2">Connect to Room</button>
+    </div>
+</div>
+
+<div id="playerScreen">
+    <div class="player-header d-flex justify-content-between">
+        <div>
+            <h4 id="movieTitleDisplay" class="mb-0 text-white fw-bold" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8);">Waiting for Media...</h4>
+            <p id="movieDescDisplay" class="mb-0 text-light small" style="text-shadow: 0 1px 2px rgba(0,0,0,0.8);">The room admin will push a movie pack shortly.</p>
+        </div>
+    </div>
+    
+    <div class="plyr-container">
+        <video id="clientPlayer" playsinline crossorigin="anonymous"></video>
+    </div>
+</div>
+
+<script>
+    const SOCKET_URL = "https://socket.elvistony.dev"; 
+    let socket = null;
+    let currentRoom = "";
+    
+    // Latches
+    let isNetworkEvent = false;
+    let isStalled = false;
+    let hasManualSub = false;
+
+    // SweetAlert2 Global Toast
+    const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true,
+        background: 'var(--cine-card)',
+        color: '#fff',
+        didOpen: (toast) => {
+            toast.addEventListener('mouseenter', Swal.stopTimer)
+            toast.addEventListener('mouseleave', Swal.resumeTimer)
+        }
+    });
+
+    // UI Elements
+    const wizardScreen = document.getElementById('wizardScreen');
+    const playerScreen = document.getElementById('playerScreen');
+    const statusBadge = document.getElementById('statusBadge');
+    const roomIdInput = document.getElementById('roomIdInput');
+    
+    // Player Setup
+    const videoElement = document.getElementById('clientPlayer');
+    const player = new Plyr(videoElement, {
+        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'settings', 'fullscreen'],
+        captions: { active: true, update: true, language: 'auto' }
+    });
+    let hlsInstance = null;
+
+    // ---------------------------------------------------------
+    // 0. AUTO-CONNECT VIA URL HASH (#123456)
+    // ---------------------------------------------------------
+    window.addEventListener('DOMContentLoaded', () => {
+        const hash = window.location.hash.substring(1);
+        if (hash && hash.length > 0) {
+            roomIdInput.value = hash;
+            document.getElementById('btnConnect').click();
+        }
+    });
+
+    // ---------------------------------------------------------
+    // 1. CONNECTION LOGIC
+    // ---------------------------------------------------------
+    document.getElementById('btnConnect').addEventListener('click', () => {
+        const roomId = roomIdInput.value.trim();
+        if(!roomId) {
+            Swal.fire({
+                title: 'Room ID Required',
+                text: 'Please enter a valid Room ID.',
+                background: 'var(--cine-card)',
+                color: '#fff',
+                confirmButtonColor: 'var(--cine-orange)'
+            });
+            return;
+        }
+
+        currentRoom = roomId;
+        window.location.hash = roomId; 
+        socket = io(SOCKET_URL);
+
+        socket.on('connect', () => {
+            statusBadge.innerText = "Connected";
+            statusBadge.className = "badge bg-success shadow";
+            socket.emit('join', currentRoom);
+            
+            wizardScreen.style.display = "none";
+            playerScreen.style.display = "flex";
+
+            Toast.fire({title: `Joined Room #${currentRoom}` });
+        });
+
+        socket.on('disconnect', () => {
+            statusBadge.innerText = "Disconnected";
+            statusBadge.className = "badge bg-danger shadow";
+            Toast.fire({ title: 'Disconnected from server', timer: 5000 });
+        });
+
+        socket.on('welcome', (data) => {
+            if (data.msg.context && typeof data.msg.context === 'object') {
+                loadMedia(data.msg.context);
+            }
+        });
+
+        socket.on('context', (data) => {
+            if (data.context) {
+                loadMedia(data.context);
+            }
+        });
+
+        socket.on('message', handleNetworkMessage);
+    });
+
+    // ---------------------------------------------------------
+    // 2. MEDIA & SUBTITLE PIPELINE
+    // ---------------------------------------------------------
+    function loadMedia(context) {
+        console.log("[SUB-DEBUG] ----- NEW MEDIA LOAD INITIATED -----");
+        console.log("[SUB-DEBUG] Context Payload:", context);
+
+        document.getElementById('movieTitleDisplay').innerText = context.title || "Unknown Title";
+        document.getElementById('movieDescDisplay').innerText = context.desc || "";
+
+        Toast.fire({ title: 'Media Sync Ready', text: context.title || "New stream available" });
+
+        const url = context.url;
+        if (!url) return;
+
+        if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
+        
+        videoElement.innerHTML = ''; 
+        hasManualSub = false;
+
+        // --- 1. MANUAL SUBTITLE OVERRIDE ---
+        if (context.subs) {
+            console.log("[SUB-DEBUG] Manual Subtitle Override detected:", context.subs);
+            hasManualSub = true;
+            const track = document.createElement('track');
+            track.kind = 'captions';
+            track.label = 'Admin Override';
+            track.srclang = 'en-override';
+            track.src = context.subs;
+            track.default = true;
+            videoElement.appendChild(track);
+            
+            setTimeout(() => {
+                player.language = 'en-override';
+                player.toggleCaptions(true);
+            }, 500);
+        }
+
+        // --- 2. HLS STREAM INJECTION ---
+        if (url.includes('.m3u8')) {
+            console.log("[SUB-DEBUG] Stream is m3u8. Initializing HLS.js...");
+            if (Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    renderTextTracksNatively: true 
+                });
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(videoElement);
+                
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
+                    console.log("[SUB-DEBUG] HLS Manifest Parsed.");
+                    console.log("[SUB-DEBUG] HLS Internal Subtitle Tracks:", hlsInstance.subtitleTracks);
+
+                    if (!hasManualSub) {
+                        const tracks = hlsInstance.subtitleTracks;
+                        if (tracks && tracks.length > 0) {
+                            let defaultIdx = tracks.findIndex(t => t.default);
+                            if (defaultIdx === -1) defaultIdx = tracks.findIndex(t => (t.name || t.lang || '').toLowerCase().includes('en'));
+                            if (defaultIdx === -1) defaultIdx = 0;
+                            
+                            console.log(`[SUB-DEBUG] Auto-selecting HLS track index: ${defaultIdx} (${tracks[defaultIdx].name})`);
+                            hlsInstance.subtitleTrack = defaultIdx;
+                            setTimeout(() => player.toggleCaptions(true), 500);
+                        } else {
+                            console.warn("[SUB-DEBUG] HLS.js found 0 subtitle tracks in the manifest.");
+                        }
+                    }
+                });
+
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                console.log("[SUB-DEBUG] HLS not supported natively. Using iOS fallback.");
+                videoElement.src = url;
+            }
+        } else {
+            videoElement.src = url;
+        }
+
+        videoElement.addEventListener('loadedmetadata', () => {
+            if(socket) socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
+        }, { once: true });
+    }
+
+    // ---------------------------------------------------------
+    // 3. THE PLYR & HLS.JS SUBTITLE BRIDGE (WITH LOGGING)
+    // ---------------------------------------------------------
+    // --- CRITICAL FIX: THE PLYR/HLS.JS SUBTITLE BRIDGE ---
+    player.on('languagechange', () => {
+        const requestedLang = player.language;
+        console.log(`\n[SUB-DEBUG] >>> Plyr 'languagechange' event fired! Requested: "${requestedLang}"`);
+
+        // 1. Handle Admin Override
+        if (requestedLang === 'en-override') {
+            console.log("[SUB-DEBUG] Admin Override selected. Disabling HLS.js tracks.");
+            if (hlsInstance) hlsInstance.subtitleTrack = -1;
+            
+            // Force the DOM to show the override track
+            const tracks = videoElement.textTracks;
+            for (let i = 0; i < tracks.length; i++) {
+                if (tracks[i].label === 'Admin Override') {
+                    tracks[i].mode = 'showing';
+                } else {
+                    tracks[i].mode = 'hidden';
+                }
+            }
+            return;
+        }
+
+        // 2. Handle HLS.js Tracks
+        if (hlsInstance && hlsInstance.subtitleTracks) {
+            const hlsTracks = hlsInstance.subtitleTracks;
+            
+            // We know requestedLang is exactly what the user clicked in Plyr's menu.
+            // We just need to find the matching HLS.js track index.
+            let matchIndex = -1;
+
+            matchIndex = hlsTracks.findIndex(t => {
+                const hlsName = (t.name || t.lang || '').toLowerCase();
+                const plyrName = (requestedLang || '').toLowerCase();
+                return hlsName === plyrName || hlsName.includes(plyrName) || plyrName.includes(hlsName);
+            });
+
+            if (matchIndex !== -1) {
+                console.log(`[SUB-DEBUG] Matched "${requestedLang}" to HLS Index: ${matchIndex}. Forcing switch.`);
+                
+                // Command HLS.js to switch the active stream
+                hlsInstance.subtitleTrack = matchIndex;
+                
+                // Force Plyr UI to stay enabled
+                setTimeout(() => {
+                    if (!player.captions.active) {
+                        player.toggleCaptions(true);
+                    }
+                }, 50);
+
+            } else {
+                console.warn(`[SUB-DEBUG] Failed to map "${requestedLang}" to any HLS.js track.`);
+            }
+        }
+    });
+
+    
+
+    player.on('captionsdisabled', () => {
+        console.log("[SUB-DEBUG] Plyr 'captionsdisabled' fired. Turning off HLS tracks.");
+        if (hlsInstance) hlsInstance.subtitleTrack = -1;
+    });
+
+    // ---------------------------------------------------------
+    // 4. NETWORK MESSAGE HANDLING
+    // ---------------------------------------------------------
+    function handleNetworkMessage(data) {
+        const senderId = data.from;
+        const msgType = data.msg?.type;
+        
+        if (senderId === socket.id) return;
+
+        if (msgType === 'stream') {
+            isNetworkEvent = true;
+            player.currentTime = 0;
+            player.pause(); 
+            setTimeout(() => isNetworkEvent = false, 100);
+        } 
+        else if (msgType === 'play') {
+            isNetworkEvent = true;
+            player.play().catch(e => {
+                Toast.fire({
+                    title: 'Autoplay Blocked',
+                    text: 'Please tap the screen to allow video playback.'
+                });
+            }).finally(() => isNetworkEvent = false);
+        } 
+        else if (msgType === 'pause') {
+            isNetworkEvent = true;
+            player.pause();
+            setTimeout(() => isNetworkEvent = false, 100);
+        } 
+        else if (msgType === 'seek') {
+            isNetworkEvent = true;
+            const seekTo = parseInt(data.msg.payload);
+            if(!isNaN(seekTo)) {
+                player.currentTime = seekTo;
+                player.pause(); 
+            }
+            setTimeout(() => isNetworkEvent = false, 100);
+        }
+    }
+
+    function emitCommand(type, cmdPayload = null) {
+        if(!socket || !socket.connected || isNetworkEvent) return;
+        socket.emit('message', { room: currentRoom, msg: { type: type, payload: cmdPayload } });
+    }
+
+    player.on('play', () => emitCommand('play'));
+    player.on('pause', () => emitCommand('pause'));
+    
+    player.on('seeked', () => { 
+        if (!isNetworkEvent) {
+            isNetworkEvent = true;
+            player.pause(); 
+            setTimeout(() => isNetworkEvent = false, 100);
+            emitCommand('seek', Math.floor(player.currentTime)); 
+        }
+    });
+
+    player.on('waiting', () => {
+        if (!isStalled && socket) {
+            isStalled = true;
+            socket.emit('message', { room: currentRoom, msg: { type: 'stalled', payload: Math.floor(player.currentTime) } });
+        }
+    });
+
+    player.on('playing', () => {
+        if (isStalled && socket) {
+            isStalled = false;
+            socket.emit('message', { room: currentRoom, msg: { type: 'recovered' } });
+        }
+    });
+
+    setInterval(() => {
+        if(socket && socket.connected && player.playing && player.duration) {
+            socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
+        }
+    }, 5000);
+
+</script>
+</body>
+</html>
