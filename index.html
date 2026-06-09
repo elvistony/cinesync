@@ -100,7 +100,7 @@
                         <label class="form-label">Description</label>
                         <input type="text" id="mediaDesc" class="form-control" value="A team of explorers travel through a wormhole...">
                     </div>
-                    <div class="mb-3">
+                    <div class="mb-3" style="display:none">
                         <label class="form-label">Raw SRT Content</label>
                         <textarea id="mediaSrt" class="form-control" rows="2">1&#10;00:00:01,000 --> 00:00:04,000&#10;Welcome to CineSyncTV.</textarea>
                     </div>
@@ -309,6 +309,7 @@
                 const ctx = data.msg.context;
                 if (ctx.url) document.getElementById('mediaUrl').value = ctx.url;
                 if (ctx.title) document.getElementById('mediaTitle').value = ctx.title;
+                if (ctx.desc) document.getElementById('mediaDesc').value = ctx.desc;
                 if (ctx.isLive !== undefined) {
                     if (ctx.isLive) document.getElementById('modeLive').checked = true;
                     else document.getElementById('modeCache').checked = true;

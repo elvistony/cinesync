@@ -145,6 +145,14 @@
     });
     let hlsInstance = null;
 
+    window.addEventListener('DOMContentLoaded', () => {
+        // Look for URL hash like #123456
+        const hash = window.location.hash.substring(1);
+        if (hash && hash.length > 0) {
+            document.getElementById('roomIdInput').value = hash;
+        }
+    });
+
     // ---------------------------------------------------------
     // 1. CONNECTION & WIZARD LOGIC
     // ---------------------------------------------------------
@@ -261,14 +269,16 @@
     player.on('pause', () => emitCommand('pause'));
     
     // NEW: Stop playback immediately after scrubbing to allow buffering
-    player.on('seeked', () => { 
-        if (!isNetworkEvent) {
-            isNetworkEvent = true;
-            player.pause(); 
-            setTimeout(() => isNetworkEvent = false, 100);
-            emitCommand('seek', Math.floor(player.currentTime)); 
-        }
-    });
+    // player.on('seeked', () => { 
+    //     if (!isNetworkEvent) {
+    //         isNetworkEvent = true;
+    //         player.pause(); 
+    //         setTimeout(() => isNetworkEvent = false, 100);
+    //         emitCommand('seek', Math.floor(player.currentTime)); 
+    //     }
+    // });
+
+    player.on('seeked', () => { if (!isNetworkEvent) emitCommand('seek', Math.floor(player.currentTime)); });
 
     player.on('waiting', () => {
         if (!isStalled && socket) {

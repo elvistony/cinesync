@@ -63,7 +63,7 @@
                                 <option value="tv">tv</option>
                                 
                             </select>
-                            <select name="" id="apiSourceSelect"  class="form-select  input-groupbg-dark text-white border-secondary">
+                            <select name="" id="apiSourceSelect" style="display:none;"  class="form-select input-groupbg-dark text-white border-secondary">
                                 <option value="vidsrc">vidsrc</option>
                                 <option value="vidrock">vidrock</option>
                                 <option value="vidzee">vidzee</option>
@@ -74,10 +74,10 @@
                                 <option value="popr">popr</option>
                             </select>
                             <input type="text" id="apiEndpoint" class="form-control bg-dark text-white border-secondary" placeholder="e.g. 12345">
-                            <button class="btn btn-warning fw-bold" id="btnFetchApi">Scan</button>
+                            <button class="btn btn-warning fw-bold" id="btnFetchApi">🔍</button>
                         </div>
                         
-                        <div class="row">
+                        <div class="row" id="apiTVRow" style="display:none">
                             <label for="">TV Show Information</label>
                             <div class="row gap-3 ps-4">
                                 <input type="text" id="apiSeason" class="form-control col bg-dark text-white border-secondary" placeholder="Season">
@@ -230,7 +230,8 @@
     // -------------------------------------------------------------------
     const SOCKET_URL = "https://socket.elvistony.dev"; 
     // Define your proxy endpoint base here if hitting an ID directly
-    const API_BASE_URL = "https://api.ezvidapi.com/"; 
+    // const API_BASE_URL = "https://api.ezvidapi.com/"; 
+    const API_BASE_URL = "https://apexmovies.net/wp-json/stream/v1/sources?tmdb_id=";
     
     let socket = null;
     let currentRoom = "";
@@ -255,6 +256,19 @@
     // -------------------------------------------------------------------
     // API FETCH LOGIC
     // -------------------------------------------------------------------
+
+    document.getElementById('apiSourceType').addEventListener('change', (e) => {
+        try {
+            if(e.target.value === 'tv') {
+                document.getElementById('apiTVRow').style.display = 'block';
+            } else {
+                document.getElementById('apiTVRow').style.display = 'none';
+
+            }
+        } catch (error) {  }
+    });
+
+
     document.getElementById('btnFetchApi').addEventListener('click', async () => {
         let input = document.getElementById('apiEndpoint').value.trim();
         const mediaType = document.getElementById('apiSourceType').value.trim();
@@ -267,12 +281,18 @@
         // Parse if it's a direct URL or just an ID
         // example for tv : ${mediaType}/${source}/${input}?season=${season}&episode=${episode}
         
+        // if (mediaType === 'tv') {
+        //     input = `${input}?season=${season}&episode=${episode}`;
+        // }
+
         if (mediaType === 'tv') {
-            input = `${input}?season=${season}&episode=${episode}`;
+            input = `${input}&season=${season}&episode=${episode}&media_type=tv`;
+            console.log(input);
         }
         
 
-        const fetchUrl = API_BASE_URL+`${mediaType}/${source}/${input}`;
+        // const fetchUrl = API_BASE_URL+`${mediaType}/${source}/${input}`;
+        const fetchUrl = API_BASE_URL+`${input}`;
         const btn = document.getElementById('btnFetchApi');
         
         try {
@@ -280,20 +300,35 @@
             
             // Fetch payload
             const response = await fetch(fetchUrl);
-            const data = await response.json();
+            const res = await response.json();
             
+            const data = await res['data'];
+            console.log(data);
             // 1. Process Video Feed(s)
             const videoSelect = document.getElementById('videoFeedSelect');
             videoSelect.innerHTML = '';
             
-            if (data.stream_url) {
+            // if (data.stream_url) {
+            //     const opt = document.createElement('option');
+            //     opt.value = data.stream_url;
+            //     opt.innerText = `${data.provider || 'Provider'} (${data.stream_type || 'Unknown'})`;
+            //     videoSelect.appendChild(opt);
+                
+            //     // Auto-fill override box
+            //     document.getElementById('mediaUrl').value = data.stream_url;
+            // } else {
+            //     videoSelect.innerHTML = '<option value="">-- No Stream Found --</option>';
+            //     document.getElementById('mediaUrl').value = '';
+            // }
+
+            if (data[0]['link']) {
                 const opt = document.createElement('option');
-                opt.value = data.stream_url;
-                opt.innerText = `${data.provider || 'Provider'} (${data.stream_type || 'Unknown'})`;
+                opt.value = data[0]['link'].replaceAll("\\","");;
+                opt.innerText = `${data.provider || 'Provider'} (${data.stream_type || 'Unspecified'})`;
                 videoSelect.appendChild(opt);
                 
                 // Auto-fill override box
-                document.getElementById('mediaUrl').value = data.stream_url;
+                document.getElementById('mediaUrl').value = data[0]['link'].replaceAll("\\","");
             } else {
                 videoSelect.innerHTML = '<option value="">-- No Stream Found --</option>';
                 document.getElementById('mediaUrl').value = '';
@@ -304,27 +339,27 @@
             subSelect.innerHTML = '<option value="">-- No Subtitles --</option>';
             document.getElementById('mediaSubUrl').value = ''; // clear previous
             
-            if (data.subtitles && Array.isArray(data.subtitles)) {
-                data.subtitles.forEach(sub => {
-                    const opt = document.createElement('option');
-                    opt.value = sub.url;
-                    opt.innerText = `${sub.language || sub.label}`;
+            // if (data.subtitles && Array.isArray(data.subtitles)) {
+            //     data.subtitles.forEach(sub => {
+            //         const opt = document.createElement('option');
+            //         opt.value = sub.url;
+            //         opt.innerText = `${sub.language || sub.label}`;
                     
-                    if (sub.default) {
-                        opt.selected = true;
-                        document.getElementById('mediaSubUrl').value = sub.url;
-                    }
-                    subSelect.appendChild(opt);
-                });
-            }
+            //         if (sub.default) {
+            //             opt.selected = true;
+            //             document.getElementById('mediaSubUrl').value = sub.url;
+            //         }
+            //         subSelect.appendChild(opt);
+            //     });
+            // }
             
-            btn.innerText = "Fetch Source";
+            btn.innerText = "🔍";
             logEvent('SYS', 'API Fetch', 'Successfully parsed Vidrock payload.');
 
         } catch (e) {
             console.error(e);
             alert("API Fetch failed. Please check the console for CORS or network errors.");
-            btn.innerText = "Fetch Source";
+            btn.innerText = "🔍";
         }
     });
 
