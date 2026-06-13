@@ -1,582 +1,387 @@
 <!DOCTYPE html>
-<html lang="en" data-bs-theme="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CineSyncTV Web Client</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <title>CineSync TV (Vanilla JS)</title>
     
-    <link href="https://cdn.jsdelivr.net/npm/@sweetalert2/theme-dark@4/dark.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    
+    <!-- Dependencies -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="https://cdn.plyr.io/3.7.8/plyr.js"></script>
-    
-    <script src="https://luke-chang.github.io/js-spatial-navigation/spatial_navigation.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     
     <style>
         :root {
-            --cine-bg: #000000;
-            --cine-orange: #E50914; 
-            --cine-card: #141416;
-            
-            /* --- NETFLIX PLAYER THEME OVERRIDES --- */
-            --plyr-color-main: #E50914; 
-            --plyr-video-background: #000000;
-            --plyr-video-control-color: #FFFFFF;
-            --plyr-control-icon-size: 28px; 
-            --plyr-menu-background: rgba(20, 20, 20, 0.95);
-            --plyr-menu-color: #FFFFFF;
+            --brand-color: #E50914; /* Netflix Red */
+            --bg-color: #000000;
+            --ui-bg: rgba(0, 0, 0, 0.7);
+            --text-color: #ffffff;
+            --focus-glow: 0 0 20px rgba(229, 9, 20, 0.8);
         }
 
-        body { 
-            background-color: var(--cine-bg); 
-            color: #fff;
-            height: 100vh;
-            width: 100vw;
+        body, html {
+            margin: 0; padding: 0;
+            width: 100vw; height: 100vh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: system-ui, -apple-system, sans-serif;
+            overflow: hidden; /* Lock screen for TV */
+        }
+
+        /* --- VIDEO LAYER --- */
+        #video-container {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: #000;
+        }
+        video {
+            width: 100%; height: 100%;
+            object-fit: contain;
+        }
+
+        /* --- UI OVERLAY LAYER --- */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
             display: flex;
             flex-direction: column;
-            overflow: hidden; 
-            font-family: system-ui, -apple-system, sans-serif;
-            margin: 0;
-            padding: 0;
+            justify-content: space-between;
+            transition: opacity 0.4s ease;
+            z-index: 10;
         }
 
-        /* --- TV 10-FOOT UI FOCUS DESIGN BLOCK --- */
-        .focusable:focus, 
-        .cine-input:focus, 
-        .btn-cine:focus,
-        .plyr__controls button:focus,
-        .plyr__controls input[type="range"]:focus,
-        .plyr__menu__container [role="menuitem"]:focus,
-        .plyr__menu__container [role="menuitemradio"]:focus {
-            outline: 4px solid var(--plyr-color-main) !important;
-            outline-offset: 4px;
-            transform: scale(1.15);
-            background-color: rgba(255,255,255,0.15);
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), outline 0.1s ease;
-            z-index: 999;
-            box-shadow: 0 0 20px rgba(229, 9, 20, 0.6);
-            border-radius: 8px;
+        .header {
+            padding: 40px 60px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, transparent 100%);
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
         }
+        
+        .header h1 { margin: 0; font-size: 3rem; text-shadow: 0 2px 10px #000; font-weight: 800; }
+        .header p { margin: 5px 0 0 0; font-size: 1.5rem; opacity: 0.8; }
+        .badge { background: #333; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 1.2rem; }
+        .badge.connected { background: #198754; }
 
-        .focusable, .cine-input, .btn-cine, .plyr__control {
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        /* Wizard Screen Styling */
-        #wizardScreen {
+        /* --- TV CONTROLS (REACT-TV-PLAYER STYLE) --- */
+        .controls {
+            background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 50%, transparent 100%);
+            padding: 60px 5% 40px 5%;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            flex-grow: 1;
-            background: radial-gradient(circle at center, #240b0b 0%, var(--cine-bg) 70%);
-        }
-        
-        .wizard-card {
-            background-color: var(--cine-card);
-            padding: 2.5rem;
-            border-radius: 20px;
-            width: 100%;
-            max-width: 480px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
         }
 
-        /* --- FULLSCREEN PLAYER LAYOUT FIX --- */
-        #playerScreen {
-            display: none;
-            width: 100vw;
-            height: 100vh;
+        .buttons-row {
+            display: flex;
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .tv-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid transparent;
+            color: white;
+            border-radius: 50%;
+            width: 70px; height: 70px;
+            font-size: 2rem;
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .progress-row {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .time-label { font-size: 1.3rem; font-weight: bold; font-variant-numeric: tabular-nums; }
+
+        .progress-bar-container {
+            flex-grow: 1;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 6px;
+            position: relative;
+            /* Using a div instead of an input makes custom TV D-pad logic much easier */
+        }
+
+        .progress-fill {
             position: absolute;
             top: 0; left: 0;
-            background-color: #000;
-        }
-        
-        .plyr-container { width: 100%; height: 100%; }
-        .plyr { width: 100%; height: 100%; }
-
-        .plyr__video-wrapper, .plyr__video-wrapper video {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: contain; 
+            height: 100%;
+            background: var(--brand-color);
+            border-radius: 6px;
+            width: 0%;
+            transition: width 0.1s linear;
         }
 
-        .player-header {
-            padding: 3rem 4rem;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.4) 60%, transparent);
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            z-index: 10;
-            transition: opacity 0.4s ease;
-            pointer-events: none;
+        /* --- THE MAGIC TV FOCUS CLASSES --- */
+        .tv-focused {
+            outline: 4px solid var(--brand-color) !important;
+            outline-offset: 4px;
+            transform: scale(1.2);
+            background: rgba(255, 255, 255, 0.2);
+            box-shadow: var(--focus-glow);
+            z-index: 20;
         }
 
-        /* --- AGGRESSIVE TV FLEXBOX OVERRIDE FOR PLYR --- */
-        .plyr--video .plyr__controls {
-            background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%) !important;
-            padding: 40px 5% 40px 5% !important;
-            display: flex !important;
-            flex-direction: column !important; /* Force column layout to guarantee two rows */
-            justify-content: flex-end !important;
-            align-items: stretch !important;
+        .progress-bar-container.tv-focused {
+            outline: 4px solid var(--brand-color);
+            transform: scaleY(1.5);
+            box-shadow: var(--focus-glow);
         }
 
-        /* Container for the buttons on top */
-        .plyr__controls__row {
-            display: flex !important;
-            justify-content: center !important;
-            align-items: center !important;
-            width: 100% !important;
-            margin-bottom: 25px !important;
-        }
-
-        /* The buttons inside the row */
-        .plyr__controls__row > * {
-            margin: 0 15px !important;
-        }
-
-        /* The scrubber on the bottom */
-        .plyr__progress {
-            width: 100% !important;
-            margin: 0 !important;
-        }
-
-        /* Scrubber Bar TV Styling */
-        .plyr input[type=range] { 
-            cursor: pointer; 
-            height: 10px; 
-            max-width: none !important; /* Prevent Plyr from compressing it */
-        }
-        .plyr input[type=range]::-webkit-slider-thumb {
-            height: 26px; 
-            width: 26px;
-            background: var(--plyr-color-main);
-            box-shadow: 0 0 15px rgba(229, 9, 20, 0.8);
-        }
-
-        .cine-marker {
-            position: absolute; top: 50%; transform: translateY(-50%);
-            width: 6px; height: 18px; background-color: #ffffff;
-            border-radius: 2px; z-index: 10; box-shadow: 0 0 4px #000;
-            pointer-events: none;
-        }
-
-        .plyr__menu__container [role="menu"] {
-            max-height: 40vh; 
-            overflow-y: auto; overflow-x: hidden;
-            border-radius: 8px;
-        }
-        .plyr__menu__container [role="menu"]::-webkit-scrollbar { width: 6px; }
-        .plyr__menu__container [role="menu"]::-webkit-scrollbar-thumb {
-            background-color: rgba(255, 255, 255, 0.3); border-radius: 10px;
-        }
-
+        /* Subtitles styling */
         ::cue {
-            color: #ffffff; background-color: transparent !important; 
-            font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
-            font-size: 2.5rem; font-weight: 700;
-            text-shadow: 0px 0px 8px rgba(0,0,0,1), 0px 2px 4px rgba(0,0,0,1), 2px 2px 2px rgba(0,0,0,1); 
-            line-height: 1.3;
+            color: #fff; background: transparent;
+            font-size: 2.5rem; text-shadow: 0 2px 4px #000, 0 0 8px #000;
         }
-        .plyr__captions { bottom: 160px !important; } 
-
-        .cine-input {
-            background-color: #222226; border: 2px solid #333339;
-            color: white; font-size: 1.5rem; letter-spacing: 2px; border-radius: 12px;
-        }
-        .btn-cine {
-            background-color: var(--cine-orange); color: #000;
-            font-weight: 800; font-size: 1.25rem; border: none; border-radius: 12px; padding: 0.75rem;
-        }
-        #statusBadge { position: fixed; top: 35px; right: 40px; z-index: 9999; font-size: 1rem; padding: 8px 16px; border-radius: 8px; }
-        .swal2-popup { border: 1px solid #333; border-radius: 16px; }
     </style>
 </head>
 <body>
 
-<span id="statusBadge" class="badge bg-danger shadow">Disconnected</span>
-
-<div id="wizardScreen">
-    <div class="text-center mb-4">
-        <h1 style="color: var(--cine-orange); font-weight: 900; font-size: 4rem; letter-spacing: -2px;">CineSync</h1>
-    </div>
-    <div class="wizard-card">
-        <h4 class="mb-4 text-white fw-bold text-center">Join Watch Party</h4>
-        <div class="mb-4">
-            <input type="text" id="roomIdInput" class="form-control cine-input form-control-lg text-center focusable" placeholder="000000" autofocus>
-        </div>
-        <button id="btnConnect" class="btn btn-cine btn-lg w-100 focusable">Connect to Room</button>
-    </div>
+<div id="video-container">
+    <video id="mediaPlayer"></video>
 </div>
 
-<div id="playerScreen">
-    <div id="pHeader" class="player-header d-flex justify-content-between">
+<div id="ui-layer">
+    <div class="header">
         <div>
-            <h1 id="movieTitleDisplay" class="mb-2 text-white fw-bold" style="text-shadow: 0 4px 10px rgba(0,0,0,0.9); font-size: 3rem;">Waiting for Media...</h1>
-            <p id="movieDescDisplay" class="mb-0 text-light opacity-75 fs-4" style="text-shadow: 0 2px 5px rgba(0,0,0,0.9);">The room admin will push a movie pack shortly.</p>
+            <h1 id="movieTitle">Waiting for Host...</h1>
+            <p id="movieDesc">Please wait for media to be pushed.</p>
         </div>
+        <div id="statusBadge" class="badge">Connecting...</div>
     </div>
-    
-    <div class="plyr-container">
-        <video id="clientPlayer" playsinline crossorigin="anonymous"></video>
+
+    <div class="controls">
+        <div class="buttons-row">
+            <!-- Data-indexes are critical for the custom Grid logic -->
+            <button class="tv-btn focusable" data-index="0" id="btnRewind"><i class="bi bi-rewind-fill"></i></button>
+            <button class="tv-btn focusable" data-index="1" id="btnPlay"><i class="bi bi-play-fill" id="playIcon"></i></button>
+            <button class="tv-btn focusable" data-index="2" id="btnForward"><i class="bi bi-fast-forward-fill"></i></button>
+            <button class="tv-btn focusable" data-index="3" id="btnCC"><i class="bi bi-badge-cc-fill"></i></button>
+        </div>
+        <div class="progress-row">
+            <span class="time-label" id="currentTime">00:00</span>
+            <div class="progress-bar-container focusable" data-index="4" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <span class="time-label" id="totalTime">00:00</span>
+        </div>
     </div>
 </div>
 
 <script>
-    const SOCKET_URL = "https://socket.elvistony.dev"; 
+    // --- 1. CORE VARIABLES ---
+    const SOCKET_URL = "https://socket.elvistony.dev";
     let socket = null;
-    let currentRoom = "";
-    
+    let roomCode = window.location.hash.substring(1); // Gets "#12345" -> "12345"
     let isNetworkEvent = false;
-    let isStalled = false;
-    let windowTimestops = [];
-
-    const Toast = Swal.mixin({
-        toast: true, position: 'top-end', showConfirmButton: false, timer: 3000,
-        timerProgressBar: true, background: 'var(--cine-card)', color: '#fff'
-    });
-
-    const wizardScreen = document.getElementById('wizardScreen');
-    const playerScreen = document.getElementById('playerScreen');
-    const statusBadge = document.getElementById('statusBadge');
-    const pHeader = document.getElementById('pHeader');
-    const roomIdInput = document.getElementById('roomIdInput');
+    let hls = null;
     
-    // --- TV LAYOUT PLYR SETUP ---
-    const videoElement = document.getElementById('clientPlayer');
-    const player = new Plyr(videoElement, {
-        controls: [
-            'rewind',       
-            'play',         
-            'fast-forward', 
-            'current-time',
-            'duration',
-            'captions',     
-            'settings',
-            'progress' 
-        ],
-        seekTime: 10,
-        captions: { active: true, update: true, language: 'auto' },
-        keyboard: { focused: false, global: false }, // CRITICAL: Disable Plyr's internal focus hijack
-        volume: 1.0, 
-        muted: false
-    });
-    let hlsInstance = null;
+    const video = document.getElementById('mediaPlayer');
+    const uiLayer = document.getElementById('ui-layer');
+    const playIcon = document.getElementById('playIcon');
+    const progressFill = document.getElementById('progressFill');
+    const statusBadge = document.getElementById('statusBadge');
+    
+    // --- 2. THE VANILLA JS TV D-PAD STATE MACHINE ---
+    // Instead of a library, we use a rigid array. 0-3 are buttons, 4 is the progress bar.
+    const focusables = document.querySelectorAll('.focusable');
+    let currentFocusIndex = 1; // Start on Play button
+    let previousTopRowIndex = 1;
 
-    // The DOM structural fix for the two-row layout.
-    // We physically pull the buttons into a wrapper div so the flexbox column rule works flawlessly.
-    player.on('ready', () => { 
-        player.volume = 1.0; player.muted = false; 
-        
-        const controls = document.querySelector('.plyr__controls');
-        if (controls) {
-            const rowWrapper = document.createElement('div');
-            rowWrapper.className = 'plyr__controls__row';
-            
-            // Move all elements EXCEPT the progress bar into the top row
-            const children = Array.from(controls.children);
-            children.forEach(child => {
-                if (!child.classList.contains('plyr__progress')) {
-                    rowWrapper.appendChild(child);
-                }
-            });
-            
-            controls.insertBefore(rowWrapper, controls.firstChild);
+    function renderFocus() {
+        focusables.forEach(el => el.classList.remove('tv-focused'));
+        focusables[currentFocusIndex].classList.add('tv-focused');
+    }
+
+    // Initial render
+    renderFocus();
+
+    // The Master Key Interceptor
+    document.addEventListener('keydown', (e) => {
+        // Prevent default scrolling
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(e.key)) {
+            e.preventDefault();
+            showUI(); // Wake up UI on any remote press
         }
+
+        switch(e.key) {
+            case 'ArrowRight':
+                if (currentFocusIndex < 3) {
+                    currentFocusIndex++;
+                } else if (currentFocusIndex === 4) {
+                    // If on progress bar, seek forward 10s
+                    seekVideo(10);
+                }
+                break;
+            case 'ArrowLeft':
+                if (currentFocusIndex > 0 && currentFocusIndex <= 3) {
+                    currentFocusIndex--;
+                } else if (currentFocusIndex === 4) {
+                    // If on progress bar, seek backward 10s
+                    seekVideo(-10);
+                }
+                break;
+            case 'ArrowDown':
+                if (currentFocusIndex < 4) {
+                    previousTopRowIndex = currentFocusIndex;
+                    currentFocusIndex = 4; // Drop down to progress bar
+                }
+                break;
+            case 'ArrowUp':
+                if (currentFocusIndex === 4) {
+                    currentFocusIndex = previousTopRowIndex; // Go back up to last used button
+                }
+                break;
+            case 'Enter':
+            case ' ':
+                // Execute action based on current focus
+                executeFocusAction();
+                break;
+        }
+        renderFocus();
     });
 
-    // ---------------------------------------------------------
-    // SPATIAL NAVIGATION (D-PAD) & EVENT INTERCEPTOR
-    // ---------------------------------------------------------
-    window.addEventListener('load', () => {
-        SpatialNavigation.init();
+    function executeFocusAction() {
+        switch(currentFocusIndex) {
+            case 0: seekVideo(-10); break; // Rewind
+            case 1: togglePlay(); break;   // Play/Pause
+            case 2: seekVideo(10); break;  // Forward
+            case 3: toggleCaptions(); break; // CC
+            case 4: togglePlay(); break;   // Pressing enter on progress bar toggles play
+        }
+    }
 
-        SpatialNavigation.add('wizard', {
-            selector: '#wizardScreen .focusable',
-            defaultElement: '#roomIdInput'
-        });
+    // --- 3. VIDEO CONTROLS LOGIC ---
+    function togglePlay() {
+        if (video.paused) {
+            video.play();
+            emitNetworkCommand('play');
+        } else {
+            video.pause();
+            emitNetworkCommand('pause');
+        }
+    }
 
-        // We bind the polyfill to the newly structured player DOM
-        SpatialNavigation.add('player', {
-            selector: '.plyr__controls button, .plyr__controls input[type="range"], [role="menuitem"], [role="menuitemradio"]'
-        });
+    function seekVideo(seconds) {
+        video.currentTime += seconds;
+        emitNetworkCommand('seek', video.currentTime);
+    }
 
-        SpatialNavigation.makeFocusable();
-        SpatialNavigation.focus('wizard');
+    function toggleCaptions() {
+        if (video.textTracks.length > 0) {
+            const track = video.textTracks[0];
+            track.mode = track.mode === 'showing' ? 'hidden' : 'showing';
+        }
+    }
 
-        // THE MASTER KEY INTERCEPTOR
-        document.addEventListener('keydown', function(e) {
-            const active = document.activeElement;
-            if (!active) return;
-
-            const inMenu = active.closest('.plyr__menu__container');
-            const isSettingsBtn = active.getAttribute('data-plyr') === 'settings';
-
-            // 1. Settings Menu Navigation Trap
-            if (inMenu && !isSettingsBtn) {
-                if (['ArrowLeft', 'Escape', 'Backspace'].includes(e.key)) {
-                    e.preventDefault(); e.stopPropagation();
-                    const backBtn = inMenu.querySelector('.plyr__control--back');
-                    if (backBtn && getComputedStyle(backBtn).display !== 'none') {
-                        backBtn.click();
-                        setTimeout(() => SpatialNavigation.focus('player'), 50);
-                    } else {
-                        const settingsBtn = document.querySelector('[data-plyr="settings"]');
-                        if (settingsBtn) { settingsBtn.click(); settingsBtn.focus(); }
-                    }
-                    return;
-                }
-                if (e.key === 'ArrowRight' && active.hasAttribute('aria-haspopup')) {
-                    e.preventDefault(); e.stopPropagation();
-                    active.click();
-                    setTimeout(() => SpatialNavigation.focus('player'), 50);
-                    return;
-                }
-            }
-
-            // 2. Video Player Focus Management
-            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                
-                // If focus is on a Button or Menu Item, STOP Plyr from seeking the video. Let the Polyfill move focus.
-                if (active.tagName === 'BUTTON' || active.getAttribute('role') === 'menuitem' || active.getAttribute('role') === 'menuitemradio') {
-                    // Do not preventDefault here, or Polyfill fails. Just stop propagation to Plyr.
-                    e.stopPropagation(); 
-                }
-                
-                // If focus is on the Scrubber, let Plyr seek natively via Left/Right.
-                if (active.tagName === 'INPUT' && active.type === 'range') {
-                    if (['ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                        e.stopPropagation(); 
-                    } else if (['ArrowUp', 'ArrowDown'].includes(e.key)) {
-                        // Let Polyfill move focus back to buttons
-                        e.stopPropagation();
-                    }
-                }
-            }
-        }, true); 
+    // Update UI Events
+    video.addEventListener('play', () => { playIcon.className = "bi bi-pause-fill"; });
+    video.addEventListener('pause', () => { playIcon.className = "bi bi-play-fill"; });
+    
+    video.addEventListener('timeupdate', () => {
+        if (!video.duration) return;
+        const percent = (video.currentTime / video.duration) * 100;
+        progressFill.style.width = `${percent}%`;
+        document.getElementById('currentTime').innerText = formatTime(video.currentTime);
     });
 
-    // Fade UI logic
-    player.on('playing', () => { pHeader.style.opacity = '0'; });
-    player.on('pause', () => { pHeader.style.opacity = '1'; });
-    player.on('controlshidden', () => { pHeader.style.opacity = '0'; });
-    player.on('controlsshown', () => { if(player.paused) pHeader.style.opacity = '1'; });
-
-    // ---------------------------------------------------------
-    // 1. CONNECTION LOGIC
-    // ---------------------------------------------------------
-    window.addEventListener('DOMContentLoaded', () => {
-        const hash = window.location.hash.substring(1);
-        if (hash) { roomIdInput.value = hash; document.getElementById('btnConnect').click(); }
+    video.addEventListener('loadedmetadata', () => {
+        document.getElementById('totalTime').innerText = formatTime(video.duration);
     });
 
-    document.getElementById('btnConnect').addEventListener('click', () => {
-        const roomId = roomIdInput.value.trim();
-        if(!roomId) return;
+    // Auto-hide UI logic
+    let uiTimeout;
+    function showUI() {
+        uiLayer.style.opacity = '1';
+        clearTimeout(uiTimeout);
+        if (!video.paused) {
+            uiTimeout = setTimeout(() => { uiLayer.style.opacity = '0'; }, 4000);
+        }
+    }
+    video.addEventListener('play', showUI);
+    video.addEventListener('pause', () => { uiLayer.style.opacity = '1'; clearTimeout(uiTimeout); });
 
-        currentRoom = roomId;
-        window.location.hash = roomId; 
+    function formatTime(seconds) {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+
+    // --- 4. SOCKET & NETWORK LOGIC ---
+    if (!roomCode) {
+        document.getElementById('movieTitle').innerText = "No Room Provided";
+        document.getElementById('movieDesc').innerText = "Please open this app with a #RoomCode in the URL.";
+    } else {
         socket = io(SOCKET_URL);
 
         socket.on('connect', () => {
-            statusBadge.innerText = "Connected";
-            statusBadge.className = "badge bg-success shadow";
-            socket.emit('join', currentRoom);
-            
-            wizardScreen.style.display = "none";
-            playerScreen.style.display = "flex";
-            
-            // Re-render spatial nav for the dynamic Player UI and focus the Play button
-            setTimeout(() => {
-                SpatialNavigation.makeFocusable();
-                SpatialNavigation.focus('player');
-                const playBtn = document.querySelector('.plyr__controls [data-plyr="play"]');
-                if(playBtn) playBtn.focus();
-            }, 600);
-
-            Toast.fire({ icon: 'success', title: `Joined Room #${currentRoom}` });
+            statusBadge.innerText = `Room: ${roomCode}`;
+            statusBadge.classList.add('connected');
+            socket.emit('join', roomCode);
         });
 
         socket.on('disconnect', () => {
             statusBadge.innerText = "Disconnected";
-            statusBadge.className = "badge bg-danger shadow";
+            statusBadge.classList.remove('connected');
         });
 
-        socket.on('welcome', (data) => {
-            if (data.msg?.context && typeof data.msg.context === 'object') loadMedia(data.msg.context);
-        });
-
-        socket.on('context', (data) => {
-            if (data.context) loadMedia(data.context);
-        });
-
+        socket.on('welcome', (data) => { if (data.msg?.context) loadMedia(data.msg.context); });
+        socket.on('context', (data) => { if (data.context) loadMedia(data.context); });
         socket.on('message', handleNetworkMessage);
-    });
+    }
 
-    // ---------------------------------------------------------
-    // 2. MEDIA LOADING & MARKERS
-    // ---------------------------------------------------------
+    function emitNetworkCommand(type, payload = null) {
+        if (isNetworkEvent || !socket || !socket.connected) return;
+        socket.emit('message', { room: roomCode, msg: { type: type, payload: payload } });
+    }
+
+    function handleNetworkMessage(data) {
+        if (data.from === socket.id) return;
+        const msgType = data.msg?.type;
+
+        isNetworkEvent = true;
+        if (msgType === 'play') video.play().catch(e => console.log(e));
+        if (msgType === 'pause') video.pause();
+        if (msgType === 'seek') video.currentTime = parseInt(data.msg.payload);
+        if (msgType === 'stream') video.currentTime = 0; video.pause();
+        
+        setTimeout(() => { isNetworkEvent = false; }, 150); // Release latch
+    }
+
+    // --- 5. MEDIA LOADING (HLS & MP4) ---
     function loadMedia(context) {
-        document.getElementById('movieTitleDisplay').innerText = context.title || "Unknown Title";
-        document.getElementById('movieDescDisplay').innerText = context.desc || "";
-        windowTimestops = context.timestops || []; 
+        document.getElementById('movieTitle').innerText = context.title || "Unknown Title";
+        document.getElementById('movieDesc').innerText = context.desc || "";
 
-        const url = context.url;
-        if (!url) return;
-
-        if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
-        videoElement.innerHTML = ''; 
-        let hasManualSub = false;
+        if (hls) { hls.destroy(); }
+        video.innerHTML = ''; // Clear old subtitles
 
         if (context.subs) {
-            hasManualSub = true;
             const track = document.createElement('track');
-            track.kind = 'captions'; track.label = 'Admin Override';
-            track.srclang = 'en-override'; track.src = context.subs; track.default = true;
-            videoElement.appendChild(track);
-            setTimeout(() => { player.language = 'en-override'; player.toggleCaptions(true); }, 500);
+            track.kind = 'captions'; track.label = 'Admin Subtitles'; track.srclang = 'en';
+            track.src = context.subs; track.default = true;
+            video.appendChild(track);
+            track.mode = 'showing';
         }
 
-        if (url.includes('.m3u8')) {
-            if (Hls.isSupported()) {
-                hlsInstance = new Hls({ renderTextTracksNatively: true });
-                hlsInstance.loadSource(url);
-                hlsInstance.attachMedia(videoElement);
-                
-                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function () {
-                    if (!hasManualSub) {
-                        const tracks = hlsInstance.subtitleTracks;
-                        if (tracks && tracks.length > 0) {
-                            let defaultIdx = tracks.findIndex(t => t.default);
-                            if (defaultIdx === -1) defaultIdx = tracks.findIndex(t => (t.name || t.lang || '').toLowerCase().includes('en'));
-                            if (defaultIdx === -1) defaultIdx = 0;
-                            hlsInstance.subtitleTrack = defaultIdx;
-                            setTimeout(() => player.toggleCaptions(true), 500);
-                        }
-                    }
-                });
-            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
-                videoElement.src = url;
-            }
+        const url = context.url;
+        if (url.includes('.m3u8') && Hls.isSupported()) {
+            hls = new Hls();
+            hls.loadSource(url);
+            hls.attachMedia(video);
         } else {
-            videoElement.src = url;
-        }
-
-        videoElement.addEventListener('loadedmetadata', () => {
-            if(socket) socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
-            renderMarkers();
-        }, { once: true });
-    }
-
-    function renderMarkers() {
-        if (!player.duration || windowTimestops.length === 0) return;
-        const progressWrap = document.querySelector('.plyr__progress');
-        if (!progressWrap) return;
-
-        document.querySelectorAll('.cine-marker').forEach(m => m.remove());
-
-        windowTimestops.forEach(ts => {
-            const sec = ts / 1000;
-            if (sec > player.duration) return;
-            const percent = (sec / player.duration) * 100;
-            
-            const marker = document.createElement('div');
-            marker.className = 'cine-marker';
-            marker.style.left = `${percent}%`;
-            progressWrap.appendChild(marker);
-        });
-    }
-
-    player.on('languagechange', () => {
-        const requestedLang = player.language;
-        if (requestedLang === 'en-override') {
-            if (hlsInstance) hlsInstance.subtitleTrack = -1;
-            const tracks = videoElement.textTracks;
-            for (let i = 0; i < tracks.length; i++) tracks[i].mode = (tracks[i].label === 'Admin Override') ? 'showing' : 'hidden';
-            return;
-        }
-
-        if (hlsInstance && hlsInstance.subtitleTracks) {
-            const hlsTracks = hlsInstance.subtitleTracks;
-            let matchIndex = hlsTracks.findIndex(t => {
-                const hlsName = (t.name || t.lang || '').toLowerCase();
-                const plyrName = (requestedLang || '').toLowerCase();
-                return hlsName === plyrName || hlsName.includes(plyrName) || plyrName.includes(hlsName);
-            });
-
-            if (matchIndex !== -1) {
-                hlsInstance.subtitleTrack = matchIndex;
-                setTimeout(() => { if (!player.captions.active) player.toggleCaptions(true); }, 50);
-            }
-        }
-    });
-
-    player.on('captionsdisabled', () => { if (hlsInstance) hlsInstance.subtitleTrack = -1; });
-
-    // ---------------------------------------------------------
-    // 3. NETWORK MESSAGE HANDLING & SEEK SYNC FIX
-    // ---------------------------------------------------------
-    function handleNetworkMessage(data) {
-        const senderId = data.from;
-        const msgType = data.msg?.type;
-        
-        if (senderId === socket.id) return;
-
-        if (msgType === 'stream') {
-            isNetworkEvent = true; player.currentTime = 0; player.pause(); setTimeout(() => isNetworkEvent = false, 100);
-        } else if (msgType === 'play') {
-            isNetworkEvent = true; player.play().catch(e => console.log(e)).finally(() => isNetworkEvent = false);
-        } else if (msgType === 'pause') {
-            isNetworkEvent = true; player.pause(); setTimeout(() => isNetworkEvent = false, 100);
-        } else if (msgType === 'seek') {
-            isNetworkEvent = true;
-            const seekTo = parseInt(data.msg.payload);
-            if(!isNaN(seekTo)) { player.currentTime = seekTo; player.pause(); }
-            setTimeout(() => isNetworkEvent = false, 100);
+            video.src = url;
         }
     }
-
-    function emitCommand(type, cmdPayload = null) {
-        if(!socket || !socket.connected || isNetworkEvent) return;
-        socket.emit('message', { room: currentRoom, msg: { type: type, payload: cmdPayload } });
-    }
-
-    player.on('play', () => emitCommand('play'));
-    player.on('pause', () => emitCommand('pause'));
-    
-    // FIX: Emit 'seek' event when user seeks with D-pad or Rewind/FF buttons
-    player.on('seeked', () => { 
-        if (!isNetworkEvent) {
-            isNetworkEvent = true; 
-            player.pause(); 
-            setTimeout(() => isNetworkEvent = false, 100);
-            emitCommand('seek', Math.floor(player.currentTime)); 
-        }
-    });
-
-    player.on('waiting', () => {
-        if (!isStalled && socket) {
-            isStalled = true;
-            socket.emit('message', { room: currentRoom, msg: { type: 'stalled', payload: Math.floor(player.currentTime) } });
-        }
-    });
-
-    player.on('playing', () => {
-        if (isStalled && socket) {
-            isStalled = false;
-            socket.emit('message', { room: currentRoom, msg: { type: 'recovered' } });
-        }
-    });
-
-    setInterval(() => {
-        if(socket && socket.connected && player.playing && player.duration) {
-            socket.emit('message', { room: currentRoom, msg: { type: 'progress', payload: 100 } });
-        }
-    }, 5000);
 </script>
 </body>
 </html>
