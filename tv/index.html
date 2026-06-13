@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CineSync TV (Vanilla JS)</title>
     
-    <!-- Dependencies -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     
     <style>
@@ -16,7 +16,7 @@
             --bg-color: #000000;
             --ui-bg: rgba(0, 0, 0, 0.7);
             --text-color: #ffffff;
-            --focus-glow: 0 0 20px rgba(229, 9, 20, 0.8);
+            --focus-glow: 0 0 20px rgba(229, 9, 20, 0.9);
         }
 
         body, html {
@@ -25,7 +25,7 @@
             background-color: var(--bg-color);
             color: var(--text-color);
             font-family: system-ui, -apple-system, sans-serif;
-            overflow: hidden; /* Lock screen for TV */
+            overflow: hidden;
         }
 
         /* --- VIDEO LAYER --- */
@@ -53,22 +53,22 @@
         }
 
         .header {
-            padding: 40px 60px;
-            background: linear-gradient(to bottom, rgba(0,0,0,0.9) 0%, transparent 100%);
+            padding: 25px 45px;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%);
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
         }
         
-        .header h1 { margin: 0; font-size: 3rem; text-shadow: 0 2px 10px #000; font-weight: 800; }
-        .header p { margin: 5px 0 0 0; font-size: 1.5rem; opacity: 0.8; }
-        .badge { background: #333; padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 1.2rem; }
-        .badge.connected { background: #198754; }
+        .header h1 { margin: 0; font-size: 2.2rem; text-shadow: 0 2px 10px #000; font-weight: 800; }
+        .header p { margin: 4px 0 0 0; font-size: 1.1rem; opacity: 0.75; }
+        .badge { background: #222; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 1rem; border: 1px solid #333; }
+        .badge.connected { background: #198754; border-color: #1ea869; }
 
-        /* --- TV CONTROLS (REACT-TV-PLAYER STYLE) --- */
+        /* --- TV CONTROLS PANEL --- */
         .controls {
-            background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.7) 50%, transparent 100%);
-            padding: 60px 5% 40px 5%;
+            background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.6) 60%, transparent 100%);
+            padding: 40px 5% 30px 5%;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -76,37 +76,38 @@
 
         .buttons-row {
             display: flex;
-            gap: 25px;
-            margin-bottom: 30px;
+            gap: 20px;
+            margin-bottom: 20px;
         }
 
         .tv-btn {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.08);
             border: 2px solid transparent;
             color: white;
             border-radius: 50%;
-            width: 70px; height: 70px;
-            font-size: 2rem;
+            width: 55px; height: 55px;
+            font-size: 1.4rem;
             display: flex; align-items: center; justify-content: center;
-            transition: transform 0.2s, background 0.2s;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s;
         }
 
         .progress-row {
             width: 100%;
             display: flex;
             align-items: center;
-            gap: 20px;
+            gap: 15px;
         }
 
-        .time-label { font-size: 1.3rem; font-weight: bold; font-variant-numeric: tabular-nums; }
+        .time-label { font-size: 1.1rem; opacity: 0.8; font-variant-numeric: tabular-nums; }
 
+        /* --- PROGRESS TRACK --- */
         .progress-bar-container {
             flex-grow: 1;
-            height: 12px;
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 3px;
             position: relative;
-            /* Using a div instead of an input makes custom TV D-pad logic much easier */
+            transition: transform 0.2s, background-color 0.2s;
         }
 
         .progress-fill {
@@ -114,38 +115,100 @@
             top: 0; left: 0;
             height: 100%;
             background: var(--brand-color);
-            border-radius: 6px;
+            border-radius: 3px;
             width: 0%;
-            transition: width 0.1s linear;
         }
 
-        /* --- THE MAGIC TV FOCUS CLASSES --- */
+        .progress-thumb {
+            position: absolute;
+            right: -8px; 
+            top: 50%;
+            transform: translateY(-50%) scale(0);
+            width: 16px; height: 13px;
+            background-color: var(--brand-color);
+            border-radius: 50%;
+            box-shadow: var(--focus-glow);
+            transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* --- FOCUS MECHANICS --- */
         .tv-focused {
-            outline: 4px solid var(--brand-color) !important;
-            outline-offset: 4px;
-            transform: scale(1.2);
-            background: rgba(255, 255, 255, 0.2);
+            outline: 3px solid var(--brand-color) !important;
+            outline-offset: 3px;
+            transform: scale(1.15);
+            background: rgba(255, 255, 255, 0.15);
             box-shadow: var(--focus-glow);
             z-index: 20;
         }
 
         .progress-bar-container.tv-focused {
-            outline: 4px solid var(--brand-color);
-            transform: scaleY(1.5);
-            box-shadow: var(--focus-glow);
+            outline: none !important;
+            box-shadow: none !important;
+            background: rgba(255, 255, 255, 0.4);
+            transform: scaleY(1.3);
         }
 
-        /* Subtitles styling */
+        .progress-bar-container.tv-focused .progress-thumb {
+            transform: translateY(-50%) scale(1.3);
+        }
+
+        /* --- QR MODAL OVERLAY --- */
+        #qr-modal {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 100;
+        }
+
+        #qr-modal.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .qr-container {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+        }
+
+        #qr-canvas img {
+            display: block;
+        }
+
+        .qr-text {
+            font-size: 1.4rem;
+            font-weight: 600;
+            text-align: center;
+            max-width: 500px;
+        }
+
+        .qr-subtext {
+            font-size: 1rem;
+            opacity: 0.6;
+            margin-top: 10px;
+        }
+
         ::cue {
             color: #fff; background: transparent;
-            font-size: 2.5rem; text-shadow: 0 2px 4px #000, 0 0 8px #000;
+            font-size: 2.2rem; text-shadow: 0 2px 4px #000, 0 0 8px #000;
         }
     </style>
 </head>
 <body>
 
 <div id="video-container">
-    <video id="mediaPlayer"></video>
+    <video id="mediaPlayer" playsinline></video>
 </div>
 
 <div id="ui-layer">
@@ -159,89 +222,109 @@
 
     <div class="controls">
         <div class="buttons-row">
-            <!-- Data-indexes are critical for the custom Grid logic -->
             <button class="tv-btn focusable" data-index="0" id="btnRewind"><i class="bi bi-rewind-fill"></i></button>
             <button class="tv-btn focusable" data-index="1" id="btnPlay"><i class="bi bi-play-fill" id="playIcon"></i></button>
             <button class="tv-btn focusable" data-index="2" id="btnForward"><i class="bi bi-fast-forward-fill"></i></button>
-            <button class="tv-btn focusable" data-index="3" id="btnCC"><i class="bi bi-badge-cc-fill"></i></button>
+            <button class="tv-btn focusable" data-index="3" id="btnSync" title="Force Sync All Clients"><i class="bi bi-clock-fill"></i></button>
+            <button class="tv-btn focusable" data-index="4" id="btnCC"><i class="bi bi-badge-cc-fill"></i></button>
+            <button class="tv-btn focusable" data-index="5" id="btnQR" title="Show Remote Control QR"><i class="bi bi-qr-code"></i></button>
         </div>
         <div class="progress-row">
             <span class="time-label" id="currentTime">00:00</span>
-            <div class="progress-bar-container focusable" data-index="4" id="progressBar">
-                <div class="progress-fill" id="progressFill"></div>
+            <div class="progress-bar-container focusable" data-index="6" id="progressBar">
+                <div class="progress-fill" id="progressFill">
+                    <div class="progress-thumb" id="progressThumb"></div>
+                </div>
             </div>
             <span class="time-label" id="totalTime">00:00</span>
         </div>
     </div>
 </div>
 
+<div id="qr-modal">
+    <div class="qr-subtext" style="margin-bottom:20px">Mobile Remote</div>
+    <div class="qr-container">
+        <div id="qr-canvas"></div>
+    </div>
+    <div class="qr-text" id="qrUrlText">Scan to Connect Remote</div>
+    <div class="qr-subtext">Press any directional key or Back to close</div>
+</div>
+
 <script>
-    // --- 1. CORE VARIABLES ---
+    // --- 1. CORE PROPERTIES ---
     const SOCKET_URL = "https://socket.elvistony.dev";
     let socket = null;
-    let roomCode = window.location.hash.substring(1); // Gets "#12345" -> "12345"
-    let isNetworkEvent = false;
+    
+    const urlParams = new URLSearchParams(window.location.search);
+    let roomCode = window.location.hash.substring(1) || urlParams.get('room') || urlParams.get('id');
+    
+    let lastLocalActionTime = 0;
+    const DEBOUNCE_WINDOW = 800; 
     let hls = null;
+    let qrGenerated = false;
     
     const video = document.getElementById('mediaPlayer');
     const uiLayer = document.getElementById('ui-layer');
     const playIcon = document.getElementById('playIcon');
     const progressFill = document.getElementById('progressFill');
     const statusBadge = document.getElementById('statusBadge');
+    const qrModal = document.getElementById('qr-modal');
     
-    // --- 2. THE VANILLA JS TV D-PAD STATE MACHINE ---
-    // Instead of a library, we use a rigid array. 0-3 are buttons, 4 is the progress bar.
+    // --- 2. GRID FOCUS MANAGEMENT ---
     const focusables = document.querySelectorAll('.focusable');
-    let currentFocusIndex = 1; // Start on Play button
+    let currentFocusIndex = 1; // Play button
     let previousTopRowIndex = 1;
 
     function renderFocus() {
         focusables.forEach(el => el.classList.remove('tv-focused'));
+        if (qrModal.classList.contains('active')) return; // Suspend visual indicator if modal is open
         focusables[currentFocusIndex].classList.add('tv-focused');
     }
 
-    // Initial render
     renderFocus();
 
-    // The Master Key Interceptor
     document.addEventListener('keydown', (e) => {
-        // Prevent default scrolling
+        // If QR code modal is open, any key press breaks out and shuts it down
+        if (qrModal.classList.contains('active')) {
+            e.preventDefault();
+            qrModal.classList.remove('active');
+            renderFocus();
+            return;
+        }
+
         if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', ' '].includes(e.key)) {
             e.preventDefault();
-            showUI(); // Wake up UI on any remote press
+            showUI(); 
         }
 
         switch(e.key) {
             case 'ArrowRight':
-                if (currentFocusIndex < 3) {
+                if (currentFocusIndex < 5) {
                     currentFocusIndex++;
-                } else if (currentFocusIndex === 4) {
-                    // If on progress bar, seek forward 10s
+                } else if (currentFocusIndex === 6) {
                     seekVideo(10);
                 }
                 break;
             case 'ArrowLeft':
-                if (currentFocusIndex > 0 && currentFocusIndex <= 3) {
+                if (currentFocusIndex > 0 && currentFocusIndex <= 5) {
                     currentFocusIndex--;
-                } else if (currentFocusIndex === 4) {
-                    // If on progress bar, seek backward 10s
+                } else if (currentFocusIndex === 6) {
                     seekVideo(-10);
                 }
                 break;
             case 'ArrowDown':
-                if (currentFocusIndex < 4) {
+                if (currentFocusIndex < 6) {
                     previousTopRowIndex = currentFocusIndex;
-                    currentFocusIndex = 4; // Drop down to progress bar
+                    currentFocusIndex = 6; 
                 }
                 break;
             case 'ArrowUp':
-                if (currentFocusIndex === 4) {
-                    currentFocusIndex = previousTopRowIndex; // Go back up to last used button
+                if (currentFocusIndex === 6) {
+                    currentFocusIndex = previousTopRowIndex; 
                 }
                 break;
             case 'Enter':
             case ' ':
-                // Execute action based on current focus
                 executeFocusAction();
                 break;
         }
@@ -250,19 +333,28 @@
 
     function executeFocusAction() {
         switch(currentFocusIndex) {
-            case 0: seekVideo(-10); break; // Rewind
-            case 1: togglePlay(); break;   // Play/Pause
-            case 2: seekVideo(10); break;  // Forward
-            case 3: toggleCaptions(); break; // CC
-            case 4: togglePlay(); break;   // Pressing enter on progress bar toggles play
+            case 0: seekVideo(-10); break; 
+            case 1: togglePlay(); break;   
+            case 2: seekVideo(10); break;  
+            case 3: forceGlobalSync(); break; // Manually transmit state signature
+            case 4: toggleCaptions(); break; 
+            case 5: showRemoteQR(); break;    // Open QR Code frame
+            case 6: togglePlay(); break;   
         }
     }
 
-    // --- 3. VIDEO CONTROLS LOGIC ---
+    // --- 3. HARDWARE PLAYER ENGINE ---
     function togglePlay() {
+        showUI();
+        lastLocalActionTime = Date.now();
+        
         if (video.paused) {
-            video.play();
-            emitNetworkCommand('play');
+            video.play().then(() => {
+                emitNetworkCommand('play');
+            }).catch(e => {
+                console.error(e);
+                emitNetworkCommand('play');
+            });
         } else {
             video.pause();
             emitNetworkCommand('pause');
@@ -270,8 +362,24 @@
     }
 
     function seekVideo(seconds) {
+        showUI();
+        lastLocalActionTime = Date.now();
         video.currentTime += seconds;
-        emitNetworkCommand('seek', video.currentTime);
+        emitNetworkCommand('seek', Math.floor(video.currentTime));
+    }
+
+    // New Clock Action: Sends a structured sequence to clamp all room clients to this position
+    function forceGlobalSync() {
+        showUI();
+        lastLocalActionTime = Date.now();
+        video.pause();
+        emitNetworkCommand('pause');
+        emitNetworkCommand('seek', Math.floor(video.currentTime));
+        
+        // Visual indicator flash on button
+        const syncBtn = document.getElementById('btnSync');
+        syncBtn.style.background = '#198754';
+        setTimeout(() => { syncBtn.style.background = ''; }, 400);
     }
 
     function toggleCaptions() {
@@ -281,10 +389,39 @@
         }
     }
 
-    // Update UI Events
-    video.addEventListener('play', () => { playIcon.className = "bi bi-pause-fill"; });
-    video.addEventListener('pause', () => { playIcon.className = "bi bi-play-fill"; });
-    
+    // New QR Modal Toggle
+    function showRemoteQR() {
+        if (!roomCode) return;
+        const targetUrl = `https://elvistony.dev/cinesync/remote/#${roomCode}`;
+        
+        document.getElementById('qrUrlText').innerText = `elvistony.dev/cinesync/remote/#${roomCode}`;
+        
+        if (!qrGenerated) {
+            new QRCode(document.getElementById("qr-canvas"), {
+                text: targetUrl,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+            qrGenerated = true;
+        }
+        qrModal.classList.add('active');
+    }
+
+    // --- 4. HARDWARE STATE INTERCEPTORS ---
+    video.addEventListener('play', () => { 
+        playIcon.className = "bi bi-pause-fill"; 
+        showUI();
+    });
+
+    video.addEventListener('pause', () => { 
+        playIcon.className = "bi bi-play-fill"; 
+        uiLayer.style.opacity = '1'; 
+        clearTimeout(uiTimeout);
+    });
+
     video.addEventListener('timeupdate', () => {
         if (!video.duration) return;
         const percent = (video.currentTime / video.duration) * 100;
@@ -296,17 +433,15 @@
         document.getElementById('totalTime').innerText = formatTime(video.duration);
     });
 
-    // Auto-hide UI logic
     let uiTimeout;
     function showUI() {
+        if (qrModal.classList.contains('active')) return;
         uiLayer.style.opacity = '1';
         clearTimeout(uiTimeout);
         if (!video.paused) {
-            uiTimeout = setTimeout(() => { uiLayer.style.opacity = '0'; }, 4000);
+            uiTimeout = setTimeout(() => { uiLayer.style.opacity = '0'; }, 3500);
         }
     }
-    video.addEventListener('play', showUI);
-    video.addEventListener('pause', () => { uiLayer.style.opacity = '1'; clearTimeout(uiTimeout); });
 
     function formatTime(seconds) {
         const h = Math.floor(seconds / 3600);
@@ -316,10 +451,10 @@
         return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     }
 
-    // --- 4. SOCKET & NETWORK LOGIC ---
+    // --- 5. NETWORK SIGNAL SIGNALS ---
     if (!roomCode) {
-        document.getElementById('movieTitle').innerText = "No Room Provided";
-        document.getElementById('movieDesc').innerText = "Please open this app with a #RoomCode in the URL.";
+        document.getElementById('movieTitle').innerText = "Missing Room Assignment";
+        document.getElementById('movieDesc').innerText = "Provide a room target parameter via hash link (#000000) or URL query (?room=000000).";
     } else {
         socket = io(SOCKET_URL);
 
@@ -340,34 +475,42 @@
     }
 
     function emitNetworkCommand(type, payload = null) {
-        if (isNetworkEvent || !socket || !socket.connected) return;
-        socket.emit('message', { room: roomCode, msg: { type: type, payload: payload } });
+        if (!socket || !socket.connected) return;
+        const packet = { 
+            room: roomCode, 
+            msg: { 
+                type: type, 
+                payload: payload,
+                timestamp: Date.now()
+            } 
+        };
+        socket.emit('message', packet);
     }
 
     function handleNetworkMessage(data) {
         if (data.from === socket.id) return;
-        const msgType = data.msg?.type;
+        if (Date.now() - lastLocalActionTime < DEBOUNCE_WINDOW) return;
 
-        isNetworkEvent = true;
+        const msgType = data.msg?.type;
+        if (!msgType) return;
+
         if (msgType === 'play') video.play().catch(e => console.log(e));
         if (msgType === 'pause') video.pause();
         if (msgType === 'seek') video.currentTime = parseInt(data.msg.payload);
-        if (msgType === 'stream') video.currentTime = 0; video.pause();
-        
-        setTimeout(() => { isNetworkEvent = false; }, 150); // Release latch
+        if (msgType === 'stream') { video.currentTime = 0; video.pause(); }
     }
 
-    // --- 5. MEDIA LOADING (HLS & MP4) ---
+    // --- 6. HLS ENGINE SOURCE CONTROLLER ---
     function loadMedia(context) {
         document.getElementById('movieTitle').innerText = context.title || "Unknown Title";
         document.getElementById('movieDesc').innerText = context.desc || "";
 
         if (hls) { hls.destroy(); }
-        video.innerHTML = ''; // Clear old subtitles
+        video.innerHTML = ''; 
 
         if (context.subs) {
             const track = document.createElement('track');
-            track.kind = 'captions'; track.label = 'Admin Subtitles'; track.srclang = 'en';
+            track.kind = 'captions'; track.label = 'En'; track.srclang = 'en';
             track.src = context.subs; track.default = true;
             video.appendChild(track);
             track.mode = 'showing';
