@@ -89,7 +89,7 @@
             width: 55px; height: 55px;
             font-size: 1.4rem;
             display: flex; align-items: center; justify-content: center;
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s, opacity 0.2s;
         }
 
         .progress-row {
@@ -140,6 +140,7 @@
             background: rgba(255, 255, 255, 0.15);
             box-shadow: var(--focus-glow);
             z-index: 20;
+            opacity: 1 !important;
         }
 
         .progress-bar-container.tv-focused {
@@ -274,6 +275,7 @@
     const progressFill = document.getElementById('progressFill');
     const statusBadge = document.getElementById('statusBadge');
     const qrModal = document.getElementById('qr-modal');
+    const btnCC = document.getElementById('btnCC');
     
     // --- 2. GRID FOCUS MANAGEMENT ---
     const focusables = document.querySelectorAll('.focusable');
@@ -384,17 +386,32 @@
 
     function togglePlay() {
         showUI();
+        
+        // If a scrub timeout is pending, force it to execute immediately before playing/pausing
+        if (isScrubbing) {
+            clearTimeout(scrubDebounceTimeout);
+            isScrubbing = false;
+            video.currentTime = Math.floor(virtualTime);
+            emitNetworkCommand('seek', Math.floor(virtualTime));
+        }
+
         lastLocalActionTime = Date.now();
         
-        if (video.paused) {
+        // Use the visual state of the Play/Pause icon to determine user intent.
+        // This avoids race conditions where the video is buffering (video.paused = false) 
+        // but appears paused to the user.
+        if (playIcon.classList.contains("bi-play-fill")) {
             video.play().then(() => {
                 emitNetworkCommand('play');
             }).catch(e => {
+                console.log("Playback failed:", e);
                 emitNetworkCommand('play');
             });
+            playIcon.className = "bi bi-pause-fill";
         } else {
             video.pause();
             emitNetworkCommand('pause');
+            playIcon.className = "bi bi-play-fill";
         }
     }
 
@@ -420,7 +437,15 @@
     function toggleCaptions() {
         if (video.textTracks.length > 0) {
             const track = video.textTracks[0];
-            track.mode = track.mode === 'showing' ? 'hidden' : 'showing';
+            if (track.mode === 'showing') {
+                track.mode = 'hidden';
+                btnCC.style.background = 'transparent';
+                btnCC.style.opacity = '0.4';
+            } else {
+                track.mode = 'showing';
+                btnCC.style.background = 'rgba(255, 255, 255, 0.2)';
+                btnCC.style.opacity = '1';
+            }
         }
     }
 
@@ -531,20 +556,72 @@
         if (msgType === 'stream') { video.currentTime = 0; video.pause(); }
     }
 
-    // --- 6. HLS ENGINE SOURCE CONTROLLER ---
-    function loadMedia(context) {
+    // --- 6. SUBTITLE SHIFTING LOGIC ---
+    async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+        try {
+            const res = await fetch(vttUrl);
+            if (!res.ok) throw new Error("VTT Fetch failed");
+            let text = await res.text();
+            
+            // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
+            const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
+            
+            text = text.replace(timeRegex, (match, h, m, s, ms) => {
+                let time = parseInt(ms) + (parseInt(s) * 1000) + (parseInt(m) * 60000);
+                if (h) time += parseInt(h) * 3600000;
+                
+                time += offsetMs;
+                if (time < 0) time = 0; // Prevent negative time
+                
+                const newH = Math.floor(time / 3600000);
+                time %= 3600000;
+                const newM = Math.floor(time / 60000);
+                time %= 60000;
+                const newS = Math.floor(time / 1000);
+                const newMs = time % 1000;
+                
+                const pad = (num, len) => String(num).padStart(len, '0');
+                return `${newH > 0 ? pad(newH, 2) + ':' : (h ? '00:' : '')}${pad(newM, 2)}:${pad(newS, 2)}.${pad(newMs, 3)}`;
+            });
+            
+            const blob = new Blob([text], { type: 'text/vtt' });
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            console.warn("Failed to shift subtitle, falling back to original URL:", e);
+            return vttUrl;
+        }
+    }
+
+    // --- 7. HLS ENGINE SOURCE CONTROLLER ---
+    async function loadMedia(context) {
         document.getElementById('movieTitle').innerText = context.title || "Unknown Title";
         document.getElementById('movieDesc').innerText = context.desc || "";
 
-        if (hls) { hls.destroy(); }
+        if (hls) { hls.destroy(); hls = null; }
         video.innerHTML = ''; 
 
         if (context.subs) {
             const track = document.createElement('track');
             track.kind = 'captions'; track.label = 'En'; track.srclang = 'en';
-            track.src = context.subs; track.default = true;
+            track.default = true;
+
+            const offsetMs = parseInt(context.subsOffset) || 0;
+            if (offsetMs !== 0) {
+                track.src = await getShiftedSubtitleUrl(context.subs, offsetMs);
+            } else {
+                track.src = context.subs;
+            }
+            
             video.appendChild(track);
             track.mode = 'showing';
+            
+            // Set initial UI state for CC Button (ON)
+            btnCC.style.background = 'rgba(255, 255, 255, 0.2)';
+            btnCC.style.opacity = '1';
+        } else {
+            // Set initial UI state for CC Button (DISABLED/OFF)
+            btnCC.style.background = 'transparent';
+            btnCC.style.opacity = '0.2';
         }
 
         const url = context.url;

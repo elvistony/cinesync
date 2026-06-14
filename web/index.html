@@ -120,7 +120,7 @@
     </div>
     
     <div class="plyr-container">
-        <video id="clientPlayer" playsinline></video>
+        <video id="clientPlayer" playsinline crossorigin="anonymous"></video>
     </div>
 </div>
 
@@ -141,7 +141,8 @@
     // Player Setup
     const videoElement = document.getElementById('clientPlayer');
     const player = new Plyr(videoElement, {
-        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'fullscreen', 'settings']
+        controls: ['play-large', 'play', 'progress', 'current-time', 'duration', 'mute', 'volume', 'captions', 'fullscreen', 'settings'],
+        captions: { active: true, update: true }
     });
     let hlsInstance = null;
 
@@ -193,9 +194,48 @@
     });
 
     // ---------------------------------------------------------
-    // 2. MEDIA LOADING LOGIC (HLS / MP4)
+    // 2. SUBTITLE SHIFTING LOGIC
     // ---------------------------------------------------------
-    function loadMedia(context) {
+    // Fetches the VTT file, parses the timestamps, shifts them by offsetMs, and returns a local Blob URL
+    async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+        try {
+            const res = await fetch(vttUrl);
+            if (!res.ok) throw new Error("VTT Fetch failed");
+            let text = await res.text();
+            
+            // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
+            const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
+            
+            text = text.replace(timeRegex, (match, h, m, s, ms) => {
+                let time = parseInt(ms) + (parseInt(s) * 1000) + (parseInt(m) * 60000);
+                if (h) time += parseInt(h) * 3600000;
+                
+                time += offsetMs;
+                if (time < 0) time = 0; // Prevent negative time
+                
+                const newH = Math.floor(time / 3600000);
+                time %= 3600000;
+                const newM = Math.floor(time / 60000);
+                time %= 60000;
+                const newS = Math.floor(time / 1000);
+                const newMs = time % 1000;
+                
+                const pad = (num, len) => String(num).padStart(len, '0');
+                return `${newH > 0 ? pad(newH, 2) + ':' : (h ? '00:' : '')}${pad(newM, 2)}:${pad(newS, 2)}.${pad(newMs, 3)}`;
+            });
+            
+            const blob = new Blob([text], { type: 'text/vtt' });
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            console.warn("Failed to shift subtitle, falling back to original URL:", e);
+            return vttUrl;
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 3. MEDIA LOADING LOGIC (HLS / MP4 + Subtitles)
+    // ---------------------------------------------------------
+    async function loadMedia(context) {
         document.getElementById('movieTitleDisplay').innerText = context.title || "Unknown Title";
         document.getElementById('movieDescDisplay').innerText = context.desc || "";
 
@@ -204,6 +244,29 @@
 
         if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
         
+        // Remove old subtitle tracks
+        videoElement.innerHTML = '';
+        
+        // Process Subtitles
+        if (context.subs) {
+            const track = document.createElement('track');
+            track.kind = 'captions';
+            track.label = 'Subtitles';
+            track.srclang = 'en';
+            track.default = true;
+
+            const offsetMs = parseInt(context.subsOffset) || 0;
+            if (offsetMs !== 0) {
+                // If there's an offset, shift it and create a local blob
+                track.src = await getShiftedSubtitleUrl(context.subs, offsetMs);
+            } else {
+                track.src = context.subs;
+            }
+            
+            videoElement.appendChild(track);
+        }
+
+        // Initialize Media Source
         if (url.includes('.m3u8')) {
             if (Hls.isSupported()) {
                 hlsInstance = new Hls();
@@ -222,7 +285,7 @@
     }
 
     // ---------------------------------------------------------
-    // 3. NETWORK MESSAGE HANDLING
+    // 4. NETWORK MESSAGE HANDLING
     // ---------------------------------------------------------
     function handleNetworkMessage(data) {
         const senderId = data.from;
@@ -230,7 +293,6 @@
         
         if (senderId === socket.id) return;
 
-        // NEW LOGIC: Seek and Stream explicitly halt playback for buffering
         if (msgType === 'stream') {
             isNetworkEvent = true;
             player.currentTime = 0;
@@ -258,7 +320,7 @@
     }
 
     // ---------------------------------------------------------
-    // 4. CLIENT STATUS REPORTING
+    // 5. CLIENT STATUS REPORTING
     // ---------------------------------------------------------
     function emitCommand(type, cmdPayload = null) {
         if(!socket || !socket.connected || isNetworkEvent) return;
@@ -267,17 +329,6 @@
 
     player.on('play', () => emitCommand('play'));
     player.on('pause', () => emitCommand('pause'));
-    
-    // NEW: Stop playback immediately after scrubbing to allow buffering
-    // player.on('seeked', () => { 
-    //     if (!isNetworkEvent) {
-    //         isNetworkEvent = true;
-    //         player.pause(); 
-    //         setTimeout(() => isNetworkEvent = false, 100);
-    //         emitCommand('seek', Math.floor(player.currentTime)); 
-    //     }
-    // });
-
     player.on('seeked', () => { if (!isNetworkEvent) emitCommand('seek', Math.floor(player.currentTime)); });
 
     player.on('waiting', () => {
