@@ -57,31 +57,21 @@
                     <div class="mb-4 p-3 border rounded border-primary bg-darker">
                         <label class="form-label text-primary fw-bold">API Source Fetch</label>
                         <div class="input-group mb-3">
-                            <!-- <span class="input-group-text bg-dark text-white border-secondary">TMDB ID</span> -->
-                            <select name="" id="apiSourceType"  class="form-select  input-groupbg-dark text-white border-secondary">
-                                <option value="movie">movie</option>
-                                <option value="tv">tv</option>
-                                
+                            <select id="apiSourceType" class="form-select bg-dark text-white border-secondary" style="max-width: 120px;">
+                                <option value="movie">Movie</option>
+                                <option value="tv">TV</option>
                             </select>
-                            <select name="" id="apiSourceSelect" style="display:none;"  class="form-select input-groupbg-dark text-white border-secondary">
-                                <option value="vidsrc">vidsrc</option>
-                                <option value="vidrock">vidrock</option>
-                                <option value="vidzee">vidzee</option>
-                                <option value="icefy">icefy</option>
-                                <option value="vidlink">vidlink</option>
-                                <option value="vidnest">vidnest</option>
-                                <option value="vixsrc">vixsrc</option>
-                                <option value="popr">popr</option>
-                            </select>
-                            <input type="text" id="apiEndpoint" class="form-control bg-dark text-white border-secondary" placeholder="e.g. 12345">
-                            <button class="btn btn-warning fw-bold" id="btnFetchApi">🔍</button>
+                            <input type="text" id="apiEndpoint" class="form-control bg-dark text-white border-secondary" placeholder="TMDB ID (e.g. 1622)">
+                            <button class="btn btn-warning fw-bold" id="btnFetchApi">🔍 Fetch</button>
                         </div>
                         
                         <div class="row" id="apiTVRow" style="display:none">
-                            <label for="">TV Show Information</label>
-                            <div class="row gap-3 ps-4">
-                                <input type="text" id="apiSeason" class="form-control col bg-dark text-white border-secondary" placeholder="Season">
-                                <input type="text" id="apiEpisode" class="form-control col bg-dark text-white border-secondary" placeholder="Episode">
+                            <label class="form-label small text-muted">TV Show Information</label>
+                            <div class="input-group mb-3 px-3">
+                                <span class="input-group-text bg-dark text-white border-secondary">S</span>
+                                <input type="number" id="apiSeason" class="form-control bg-dark text-white border-secondary" placeholder="Season" value="1">
+                                <span class="input-group-text bg-dark text-white border-secondary border-start-0">E</span>
+                                <input type="number" id="apiEpisode" class="form-control bg-dark text-white border-secondary" placeholder="Episode" value="1">
                             </div>
                         </div>
 
@@ -121,9 +111,19 @@
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        <label class="form-label">Subtitle URL (Manual Override)</label>
-                        <input type="text" id="mediaSubUrl" class="form-control" placeholder="https://.../.vtt">
+                    <div class="row mb-3">
+                        <div class="col-md-7">
+                            <label class="form-label">Subtitle URL (Manual Override)</label>
+                            <input type="text" id="mediaSubUrl" class="form-control" placeholder="https://.../.vtt">
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label">Subtitle Offset (ms)</label>
+                            <div class="input-group">
+                                <button class="btn btn-outline-secondary" id="btnSubOffsetDec">-100</button>
+                                <input type="number" id="subOffset" class="form-control text-center" value="0" step="100">
+                                <button class="btn btn-outline-secondary" id="btnSubOffsetInc">+100</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div id="previewContainer" class="mb-4 bg-dark rounded shadow-sm">
@@ -229,8 +229,6 @@
     // CONFIGURATION
     // -------------------------------------------------------------------
     const SOCKET_URL = "https://socket.elvistony.dev"; 
-    // Define your proxy endpoint base here if hitting an ID directly
-    // const API_BASE_URL = "https://api.ezvidapi.com/"; 
     const API_BASE_URL = "https://apexmovies.net/wp-json/stream/v1/sources?tmdb_id=";
     
     let socket = null;
@@ -258,108 +256,117 @@
     // -------------------------------------------------------------------
 
     document.getElementById('apiSourceType').addEventListener('change', (e) => {
-        try {
-            if(e.target.value === 'tv') {
-                document.getElementById('apiTVRow').style.display = 'block';
-            } else {
-                document.getElementById('apiTVRow').style.display = 'none';
-
-            }
-        } catch (error) {  }
+        if(e.target.value === 'tv') {
+            document.getElementById('apiTVRow').style.display = 'flex';
+        } else {
+            document.getElementById('apiTVRow').style.display = 'none';
+        }
     });
 
+    // Subtitle Offset Controls
+    document.getElementById('btnSubOffsetDec').addEventListener('click', () => {
+        const input = document.getElementById('subOffset');
+        input.value = parseInt(input.value || 0) - 100;
+    });
+    
+    document.getElementById('btnSubOffsetInc').addEventListener('click', () => {
+        const input = document.getElementById('subOffset');
+        input.value = parseInt(input.value || 0) + 100;
+    });
 
     document.getElementById('btnFetchApi').addEventListener('click', async () => {
-        let input = document.getElementById('apiEndpoint').value.trim();
+        let tmdbId = document.getElementById('apiEndpoint').value.trim();
         const mediaType = document.getElementById('apiSourceType').value.trim();
-        const source = document.getElementById('apiSourceSelect').value.trim();
         const season = document.getElementById('apiSeason').value.trim();
         const episode = document.getElementById('apiEpisode').value.trim();
         
-        if(!input) return alert("Enter a Movie ID or URL");
+        if(!tmdbId) return alert("Enter a TMDB ID");
 
-        // Parse if it's a direct URL or just an ID
-        // example for tv : ${mediaType}/${source}/${input}?season=${season}&episode=${episode}
-        
-        // if (mediaType === 'tv') {
-        //     input = `${input}?season=${season}&episode=${episode}`;
-        // }
+        // 1. Construct Stream URL
+        let streamUrl = API_BASE_URL + tmdbId;
+        // 2. Construct Subtitle URL
+        let subsApiUrl = `https://sub.vdrk.site/v2/${mediaType}/${tmdbId}`;
 
         if (mediaType === 'tv') {
-            input = `${input}&season=${season}&episode=${episode}&media_type=tv`;
-            console.log(input);
+            streamUrl += `&season=${season}&episode=${episode}&media_type=tv`;
+            subsApiUrl += `/${season}/${episode}`;
         }
         
-
-        // const fetchUrl = API_BASE_URL+`${mediaType}/${source}/${input}`;
-        const fetchUrl = API_BASE_URL+`${input}`;
         const btn = document.getElementById('btnFetchApi');
         
         try {
             btn.innerText = "Fetching...";
             
-            // Fetch payload
-            const response = await fetch(fetchUrl);
+            // --- FETCH VIDEO STREAMS ---
+            const response = await fetch(streamUrl);
             const res = await response.json();
             
-            const data = await res['data'];
-            console.log(data);
-            // 1. Process Video Feed(s)
             const videoSelect = document.getElementById('videoFeedSelect');
             videoSelect.innerHTML = '';
             
-            // if (data.stream_url) {
-            //     const opt = document.createElement('option');
-            //     opt.value = data.stream_url;
-            //     opt.innerText = `${data.provider || 'Provider'} (${data.stream_type || 'Unknown'})`;
-            //     videoSelect.appendChild(opt);
-                
-            //     // Auto-fill override box
-            //     document.getElementById('mediaUrl').value = data.stream_url;
-            // } else {
-            //     videoSelect.innerHTML = '<option value="">-- No Stream Found --</option>';
-            //     document.getElementById('mediaUrl').value = '';
-            // }
-
-            if (data[0]['link']) {
-                const opt = document.createElement('option');
-                opt.value = data[0]['link'].replaceAll("\\","");;
-                opt.innerText = `${data.provider || 'Provider'} (${data.stream_type || 'Unspecified'})`;
-                videoSelect.appendChild(opt);
-                
-                // Auto-fill override box
-                document.getElementById('mediaUrl').value = data[0]['link'].replaceAll("\\","");
+            if (res.success && res.data && res.data.length > 0) {
+                res.data.forEach((feed, index) => {
+                    const opt = document.createElement('option');
+                    // Remove escaping slashes if present
+                    opt.value = feed.link.replace(/\\/g, ''); 
+                    opt.innerText = `${feed.name || feed.host} (${feed.quality || feed.type})`;
+                    videoSelect.appendChild(opt);
+                    
+                    if (index === 0) {
+                        document.getElementById('mediaUrl').value = opt.value;
+                    }
+                });
             } else {
                 videoSelect.innerHTML = '<option value="">-- No Stream Found --</option>';
                 document.getElementById('mediaUrl').value = '';
             }
 
-            // 2. Process Subtitles
+            // --- FETCH SUBTITLES ---
             const subSelect = document.getElementById('subtitleSelect');
-            subSelect.innerHTML = '<option value="">-- No Subtitles --</option>';
-            document.getElementById('mediaSubUrl').value = ''; // clear previous
+            subSelect.innerHTML = '<option value="">-- No Subs Loaded --</option>';
+            document.getElementById('mediaSubUrl').value = ''; 
             
-            // if (data.subtitles && Array.isArray(data.subtitles)) {
-            //     data.subtitles.forEach(sub => {
-            //         const opt = document.createElement('option');
-            //         opt.value = sub.url;
-            //         opt.innerText = `${sub.language || sub.label}`;
-                    
-            //         if (sub.default) {
-            //             opt.selected = true;
-            //             document.getElementById('mediaSubUrl').value = sub.url;
-            //         }
-            //         subSelect.appendChild(opt);
-            //     });
-            // }
+            try {
+                const subsResponse = await fetch(subsApiUrl);
+                if (subsResponse.ok) {
+                    const subsData = await subsResponse.json();
+                    if (Array.isArray(subsData) && subsData.length > 0) {
+                        subSelect.innerHTML = '<option value="">-- Select Subtitle --</option>';
+                        
+                        let englishFound = false;
+                        
+                        subsData.forEach(sub => {
+                            const opt = document.createElement('option');
+                            opt.value = sub.file;
+                            opt.innerText = sub.label;
+                            
+                            // Try to auto-select English
+                            if (sub.label.toLowerCase().includes('english') && !englishFound) {
+                                opt.selected = true;
+                                document.getElementById('mediaSubUrl').value = sub.file;
+                                englishFound = true;
+                            }
+                            subSelect.appendChild(opt);
+                        });
+                        
+                        // If no English found, just pick the first one
+                        if (!englishFound) {
+                            subSelect.options[1].selected = true;
+                            document.getElementById('mediaSubUrl').value = subSelect.options[1].value;
+                        }
+                    }
+                }
+            } catch (subErr) {
+                console.warn("Could not fetch subtitles:", subErr);
+            }
             
-            btn.innerText = "🔍";
-            logEvent('SYS', 'API Fetch', 'Successfully parsed Vidrock payload.');
+            btn.innerText = "🔍 Fetch";
+            logEvent('SYS', 'API Fetch', `Successfully retrieved streams & subs for TMDB: ${tmdbId}`);
 
         } catch (e) {
             console.error(e);
             alert("API Fetch failed. Please check the console for CORS or network errors.");
-            btn.innerText = "🔍";
+            btn.innerText = "🔍 Fetch";
         }
     });
 
@@ -425,14 +432,6 @@
     player.on('play', () => { if (!isNetworkEvent) emitCommand('play'); });
     player.on('pause', () => { if (!isNetworkEvent) emitCommand('pause'); });
     player.on('seeked', () => { if (!isNetworkEvent) emitCommand('seek', Math.floor(player.currentTime)); });
-    // player.on('seeked', () => { 
-    //     if (!isNetworkEvent) {
-    //         isNetworkEvent = true;
-    //         player.pause();
-    //         setTimeout(() => isNetworkEvent = false, 100);
-    //         emitCommand('seek', Math.floor(player.currentTime)); 
-    //     }
-    // });
 
     // -------------------------------------------------------------------
     // SOCKET & UI LOGIC
@@ -507,6 +506,7 @@
                 const ctx = data.msg.context;
                 if (ctx.url) document.getElementById('mediaUrl').value = ctx.url;
                 if (ctx.subs) document.getElementById('mediaSubUrl').value = ctx.subs;
+                if (ctx.subsOffset !== undefined) document.getElementById('subOffset').value = ctx.subsOffset;
                 if (ctx.title) document.getElementById('mediaTitle').value = ctx.title;
                 if (ctx.desc) document.getElementById('mediaDesc').value = ctx.desc;
                 if (ctx.isLive !== undefined) {
@@ -585,6 +585,7 @@
         
         const urlValue = document.getElementById('mediaUrl').value;
         const subValue = document.getElementById('mediaSubUrl').value;
+        const subOffsetValue = parseInt(document.getElementById('subOffset').value) || 0;
         const isLiveStream = document.getElementById('modeLive').checked;
         const isPreviewOn = previewToggle.checked;
         const numBreaks = parseInt(document.getElementById('mediaTimestops').value) || 0;
@@ -605,7 +606,8 @@
         const contextData = {
             url: urlValue,
             subs: subValue,
-            tmdb:document.getElementById('apiEndpoint').value || 0,
+            subsOffset: subOffsetValue, 
+            tmdb: document.getElementById('apiEndpoint').value || 0,
             title: document.getElementById('mediaTitle').value,
             desc: document.getElementById('mediaDesc').value,
             timestops: computedTimestops, 
