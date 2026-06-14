@@ -38,6 +38,7 @@
         video {
             width: 100%; height: 100%;
             object-fit: contain;
+            background-color: #000;
         }
 
         /* --- UI OVERLAY LAYER --- */
@@ -124,7 +125,7 @@
             right: -8px; 
             top: 50%;
             transform: translateY(-50%) scale(0);
-            width: 16px; height: 13px;
+            width: 16px; height: 16px;
             background-color: var(--brand-color);
             border-radius: 50%;
             box-shadow: var(--focus-glow);
@@ -208,7 +209,7 @@
 <body>
 
 <div id="video-container">
-    <video id="mediaPlayer" playsinline></video>
+    <video id="mediaPlayer" playsinline poster="player-standby.png"></video>
 </div>
 
 <div id="ui-layer">
@@ -242,7 +243,6 @@
 </div>
 
 <div id="qr-modal">
-    <div class="qr-subtext" style="margin-bottom:20px">Mobile Remote</div>
     <div class="qr-container">
         <div id="qr-canvas"></div>
     </div>
@@ -262,6 +262,11 @@
     const DEBOUNCE_WINDOW = 800; 
     let hls = null;
     let qrGenerated = false;
+
+    // Smooth Scrubbing Engine parameters
+    let isScrubbing = false;
+    let virtualTime = 0;
+    let scrubDebounceTimeout = null;
     
     const video = document.getElementById('mediaPlayer');
     const uiLayer = document.getElementById('ui-layer');
@@ -272,19 +277,23 @@
     
     // --- 2. GRID FOCUS MANAGEMENT ---
     const focusables = document.querySelectorAll('.focusable');
-    let currentFocusIndex = 1; // Play button
+    let currentFocusIndex = 1; 
     let previousTopRowIndex = 1;
 
     function renderFocus() {
         focusables.forEach(el => el.classList.remove('tv-focused'));
-        if (qrModal.classList.contains('active')) return; // Suspend visual indicator if modal is open
+        if (qrModal.classList.contains('active')) return; 
         focusables[currentFocusIndex].classList.add('tv-focused');
+
+        // Reset virtual scrubbing state if focus leaves the slider line
+        if (currentFocusIndex !== 6 && isScrubbing) {
+            isScrubbing = false;
+        }
     }
 
     renderFocus();
 
     document.addEventListener('keydown', (e) => {
-        // If QR code modal is open, any key press breaks out and shuts it down
         if (qrModal.classList.contains('active')) {
             e.preventDefault();
             qrModal.classList.remove('active');
@@ -302,14 +311,14 @@
                 if (currentFocusIndex < 5) {
                     currentFocusIndex++;
                 } else if (currentFocusIndex === 6) {
-                    seekVideo(10);
+                    handleScrub(15); // Shift virtual pointer ahead instantly
                 }
                 break;
             case 'ArrowLeft':
                 if (currentFocusIndex > 0 && currentFocusIndex <= 5) {
                     currentFocusIndex--;
                 } else if (currentFocusIndex === 6) {
-                    seekVideo(-10);
+                    handleScrub(-15); // Shift virtual pointer behind instantly
                 }
                 break;
             case 'ArrowDown':
@@ -336,14 +345,43 @@
             case 0: seekVideo(-10); break; 
             case 1: togglePlay(); break;   
             case 2: seekVideo(10); break;  
-            case 3: forceGlobalSync(); break; // Manually transmit state signature
+            case 3: forceGlobalSync(); break; 
             case 4: toggleCaptions(); break; 
-            case 5: showRemoteQR(); break;    // Open QR Code frame
+            case 5: showRemoteQR(); break;    
             case 6: togglePlay(); break;   
         }
     }
 
-    // --- 3. HARDWARE PLAYER ENGINE ---
+    // --- 3. FLUID SCRUBBING ENGINE ---
+    function handleScrub(seconds) {
+        if (!video.duration) return;
+        
+        // Lock video updates during active remote holding sessions
+        if (!isScrubbing) {
+            isScrubbing = true;
+            virtualTime = video.currentTime;
+        }
+
+        // Bound variables inside valid range constraints
+        virtualTime = Math.max(0, Math.min(video.duration, virtualTime + seconds));
+        
+        // Direct, instantaneous UI rendering updates without waiting for internal buffers
+        const percent = (virtualTime / video.duration) * 100;
+        progressFill.style.width = `${percent}%`;
+        document.getElementById('currentTime').innerText = formatTime(virtualTime);
+
+        // Debounce window clears out fast triggers to prevent system buffer pipeline lock
+        clearTimeout(scrubDebounceTimeout);
+        scrubDebounceTimeout = setTimeout(() => {
+            if (!isScrubbing) return;
+            isScrubbing = false;
+            
+            lastLocalActionTime = Date.now();
+            video.currentTime = Math.floor(virtualTime);
+            emitNetworkCommand('seek', Math.floor(virtualTime));
+        }, 400); // 400ms filter block window
+    }
+
     function togglePlay() {
         showUI();
         lastLocalActionTime = Date.now();
@@ -352,7 +390,6 @@
             video.play().then(() => {
                 emitNetworkCommand('play');
             }).catch(e => {
-                console.error(e);
                 emitNetworkCommand('play');
             });
         } else {
@@ -368,7 +405,6 @@
         emitNetworkCommand('seek', Math.floor(video.currentTime));
     }
 
-    // New Clock Action: Sends a structured sequence to clamp all room clients to this position
     function forceGlobalSync() {
         showUI();
         lastLocalActionTime = Date.now();
@@ -376,7 +412,6 @@
         emitNetworkCommand('pause');
         emitNetworkCommand('seek', Math.floor(video.currentTime));
         
-        // Visual indicator flash on button
         const syncBtn = document.getElementById('btnSync');
         syncBtn.style.background = '#198754';
         setTimeout(() => { syncBtn.style.background = ''; }, 400);
@@ -389,20 +424,16 @@
         }
     }
 
-    // New QR Modal Toggle
     function showRemoteQR() {
         if (!roomCode) return;
         const targetUrl = `https://elvistony.dev/cinesync/remote/#${roomCode}`;
-        
-        document.getElementById('qrUrlText').innerText = `elvistony.dev/cinesync/remote/#${roomCode}`;
+        document.getElementById('qrUrlText').innerText = `Room Link: elvistony.dev/cinesync/remote/#${roomCode}`;
         
         if (!qrGenerated) {
             new QRCode(document.getElementById("qr-canvas"), {
                 text: targetUrl,
-                width: 200,
-                height: 200,
-                colorDark : "#000000",
-                colorLight : "#ffffff",
+                width: 200, height: 200,
+                colorDark : "#000000", colorLight : "#ffffff",
                 correctLevel : QRCode.CorrectLevel.H
             });
             qrGenerated = true;
@@ -423,7 +454,8 @@
     });
 
     video.addEventListener('timeupdate', () => {
-        if (!video.duration) return;
+        // Suspend UI engine timeline adjustments if user is moving slider manually
+        if (isScrubbing || !video.duration) return;
         const percent = (video.currentTime / video.duration) * 100;
         progressFill.style.width = `${percent}%`;
         document.getElementById('currentTime').innerText = formatTime(video.currentTime);
@@ -478,11 +510,7 @@
         if (!socket || !socket.connected) return;
         const packet = { 
             room: roomCode, 
-            msg: { 
-                type: type, 
-                payload: payload,
-                timestamp: Date.now()
-            } 
+            msg: { type: type, payload: payload, timestamp: Date.now() } 
         };
         socket.emit('message', packet);
     }
@@ -496,7 +524,10 @@
 
         if (msgType === 'play') video.play().catch(e => console.log(e));
         if (msgType === 'pause') video.pause();
-        if (msgType === 'seek') video.currentTime = parseInt(data.msg.payload);
+        if (msgType === 'seek') {
+            isScrubbing = false; // Override any active local scrub if a global update breaks in
+            video.currentTime = parseInt(data.msg.payload);
+        }
         if (msgType === 'stream') { video.currentTime = 0; video.pause(); }
     }
 
