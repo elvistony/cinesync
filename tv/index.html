@@ -51,6 +51,7 @@
             justify-content: space-between;
             transition: opacity 0.4s ease;
             z-index: 10;
+            zoom: 0.9; /* 10% Scale Down */
         }
 
         .header {
@@ -63,8 +64,19 @@
         
         .header h1 { margin: 0; font-size: 2.2rem; text-shadow: 0 2px 10px #000; font-weight: 800; }
         .header p { margin: 4px 0 0 0; font-size: 1.1rem; opacity: 0.75; }
-        .badge { background: #222; padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 1rem; border: 1px solid #333; }
-        .badge.connected { background: #198754; border-color: #1ea869; }
+        
+        /* Minimalist Status Badge */
+        #statusBadge { 
+            background: transparent; 
+            padding: 6px 12px; 
+            font-weight: 600; 
+            font-size: 1.2rem; 
+            opacity: 0.8;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+        }
 
         /* --- TV CONTROLS PANEL --- */
         .controls {
@@ -89,7 +101,13 @@
             width: 55px; height: 55px;
             font-size: 1.4rem;
             display: flex; align-items: center; justify-content: center;
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s, opacity 0.2s;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s, opacity 0.2s, color 0.2s;
+        }
+
+        /* CC Active Indicator */
+        .tv-btn.active {
+            background: rgba(255, 255, 255, 0.95) !important;
+            color: var(--bg-color) !important;
         }
 
         .progress-row {
@@ -169,6 +187,7 @@
             pointer-events: none;
             transition: opacity 0.3s ease;
             z-index: 100;
+            zoom: 0.9; /* Match 10% scale down */
         }
 
         #qr-modal.active {
@@ -219,7 +238,11 @@
             <h1 id="movieTitle">Waiting for Host...</h1>
             <p id="movieDesc">Please wait for media to be pushed.</p>
         </div>
-        <div id="statusBadge" class="badge">Connecting...</div>
+        <div id="statusBadge">
+            <span><i class="bi bi-people-fill"></i> <span id="userCountDisplay">1</span></span>
+            <span style="opacity: 0.5;">|</span>
+            <span>Room: <span id="roomCodeDisplay">...</span></span>
+        </div>
     </div>
 
     <div class="controls">
@@ -248,7 +271,7 @@
         <div id="qr-canvas"></div>
     </div>
     <div class="qr-text" id="qrUrlText">Scan to Connect Remote</div>
-    <div class="qr-subtext">Press any directional key or Back to close</div>
+    <div class="qr-subtext">Press OK to close</div>
 </div>
 
 <script>
@@ -276,7 +299,11 @@
     const statusBadge = document.getElementById('statusBadge');
     const qrModal = document.getElementById('qr-modal');
     const btnCC = document.getElementById('btnCC');
+    const userCountDisplay = document.getElementById('userCountDisplay');
+    const roomCodeDisplay = document.getElementById('roomCodeDisplay');
     
+    roomCodeDisplay.innerText = roomCode || "...";
+
     // --- 2. GRID FOCUS MANAGEMENT ---
     const focusables = document.querySelectorAll('.focusable');
     let currentFocusIndex = 1; 
@@ -296,10 +323,13 @@
     renderFocus();
 
     document.addEventListener('keydown', (e) => {
+        // Handle QR Modal Dismissal (Only OK / Enter / Space)
         if (qrModal.classList.contains('active')) {
             e.preventDefault();
-            qrModal.classList.remove('active');
-            renderFocus();
+            if (e.key === 'Enter' || e.key === ' ') {
+                qrModal.classList.remove('active');
+                renderFocus();
+            }
             return;
         }
 
@@ -398,8 +428,6 @@
         lastLocalActionTime = Date.now();
         
         // Use the visual state of the Play/Pause icon to determine user intent.
-        // This avoids race conditions where the video is buffering (video.paused = false) 
-        // but appears paused to the user.
         if (playIcon.classList.contains("bi-play-fill")) {
             video.play().then(() => {
                 emitNetworkCommand('play');
@@ -439,12 +467,10 @@
             const track = video.textTracks[0];
             if (track.mode === 'showing') {
                 track.mode = 'hidden';
-                btnCC.style.background = 'transparent';
-                btnCC.style.opacity = '0.4';
+                btnCC.classList.remove('active');
             } else {
                 track.mode = 'showing';
-                btnCC.style.background = 'rgba(255, 255, 255, 0.2)';
-                btnCC.style.opacity = '1';
+                btnCC.classList.add('active');
             }
         }
     }
@@ -452,7 +478,6 @@
     function showRemoteQR() {
         if (!roomCode) return;
         const targetUrl = `https://elvistony.dev/cinesync/remote/#${roomCode}`;
-        document.getElementById('qrUrlText').innerText = `Room Link: elvistony.dev/cinesync/remote/#${roomCode}`;
         
         if (!qrGenerated) {
             new QRCode(document.getElementById("qr-canvas"), {
@@ -516,17 +541,24 @@
         socket = io(SOCKET_URL);
 
         socket.on('connect', () => {
-            statusBadge.innerText = `Room: ${roomCode}`;
-            statusBadge.classList.add('connected');
             socket.emit('join', roomCode);
         });
 
         socket.on('disconnect', () => {
-            statusBadge.innerText = "Disconnected";
-            statusBadge.classList.remove('connected');
+            userCountDisplay.innerText = "0";
+            userCountDisplay.style.color = "#E50914"; // Turn red if disconnected
         });
 
-        socket.on('welcome', (data) => { if (data.msg?.context) loadMedia(data.msg.context); });
+        socket.on('welcome', (data) => { 
+            userCountDisplay.innerText = data.msg?.count || 1;
+            userCountDisplay.style.color = ""; // Reset color
+            if (data.msg?.context) loadMedia(data.msg.context); 
+        });
+        
+        socket.on('roomupdate', (data) => {
+            if (data.msg?.count) userCountDisplay.innerText = data.msg.count;
+        });
+
         socket.on('context', (data) => { if (data.context) loadMedia(data.context); });
         socket.on('message', handleNetworkMessage);
     }
@@ -615,13 +647,13 @@
             video.appendChild(track);
             track.mode = 'showing';
             
-            // Set initial UI state for CC Button (ON)
-            btnCC.style.background = 'rgba(255, 255, 255, 0.2)';
+            // Set initial UI state for CC Button (ON / ACTIVE)
+            btnCC.classList.add('active');
             btnCC.style.opacity = '1';
         } else {
             // Set initial UI state for CC Button (DISABLED/OFF)
-            btnCC.style.background = 'transparent';
-            btnCC.style.opacity = '0.2';
+            btnCC.classList.remove('active');
+            btnCC.style.opacity = '0.3';
         }
 
         const url = context.url;

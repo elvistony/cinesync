@@ -252,26 +252,106 @@
     let hlsInstance = null;
 
     // -------------------------------------------------------------------
+    // SUBTITLE SHIFTING & HOT-SWAP LOGIC
+    // -------------------------------------------------------------------
+    async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+        if (!vttUrl) return null;
+        if (offsetMs === 0) return vttUrl;
+        
+        try {
+            const res = await fetch(vttUrl);
+            if (!res.ok) throw new Error("VTT Fetch failed");
+            let text = await res.text();
+            
+            // Regex to match standard VTT timestamps
+            const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
+            
+            text = text.replace(timeRegex, (match, h, m, s, ms) => {
+                let time = parseInt(ms) + (parseInt(s) * 1000) + (parseInt(m) * 60000);
+                if (h) time += parseInt(h) * 3600000;
+                
+                time += offsetMs;
+                if (time < 0) time = 0; 
+                
+                const newH = Math.floor(time / 3600000);
+                time %= 3600000;
+                const newM = Math.floor(time / 60000);
+                time %= 60000;
+                const newS = Math.floor(time / 1000);
+                const newMs = time % 1000;
+                
+                const pad = (num, len) => String(num).padStart(len, '0');
+                return `${newH > 0 ? pad(newH, 2) + ':' : (h ? '00:' : '')}${pad(newM, 2)}:${pad(newS, 2)}.${pad(newMs, 3)}`;
+            });
+            
+            const blob = new Blob([text], { type: 'text/vtt' });
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            console.warn("Failed to shift subtitle:", e);
+            return vttUrl;
+        }
+    }
+
+    async function updatePreviewSubtitles() {
+        if (!previewToggle.checked) return;
+        
+        const subUrl = document.getElementById('mediaSubUrl').value;
+        const offsetMs = parseInt(document.getElementById('subOffset').value) || 0;
+        
+        // Remove existing tracks
+        Array.from(videoElement.querySelectorAll('track')).forEach(t => t.remove());
+        
+        if (subUrl) {
+            const track = document.createElement('track');
+            track.kind = 'captions';
+            track.label = 'Enabled Subtitle';
+            track.srclang = 'en';
+            track.default = true;
+            
+            track.src = await getShiftedSubtitleUrl(subUrl, offsetMs);
+            videoElement.appendChild(track);
+            
+            // Force browser to recognize the new track
+            setTimeout(() => {
+                if(videoElement.textTracks && videoElement.textTracks.length > 0) {
+                    videoElement.textTracks[0].mode = 'showing';
+                }
+            }, 100);
+            
+            logEvent('SYS', 'Subtitles Updated', `Offset applied: ${offsetMs}ms`);
+        }
+    }
+
+    // Debounce the offset controls so it doesn't spam the VTT parser
+    let subOffsetDebounce = null;
+    function triggerSubOffsetPreview() {
+        clearTimeout(subOffsetDebounce);
+        subOffsetDebounce = setTimeout(updatePreviewSubtitles, 600);
+    }
+
+    document.getElementById('btnSubOffsetDec').addEventListener('click', () => {
+        const input = document.getElementById('subOffset');
+        input.value = parseInt(input.value || 0) - 100;
+        triggerSubOffsetPreview();
+    });
+    
+    document.getElementById('btnSubOffsetInc').addEventListener('click', () => {
+        const input = document.getElementById('subOffset');
+        input.value = parseInt(input.value || 0) + 100;
+        triggerSubOffsetPreview();
+    });
+    
+    document.getElementById('subOffset').addEventListener('input', triggerSubOffsetPreview);
+
+    // -------------------------------------------------------------------
     // API FETCH LOGIC
     // -------------------------------------------------------------------
-
     document.getElementById('apiSourceType').addEventListener('change', (e) => {
         if(e.target.value === 'tv') {
             document.getElementById('apiTVRow').style.display = 'flex';
         } else {
             document.getElementById('apiTVRow').style.display = 'none';
         }
-    });
-
-    // Subtitle Offset Controls
-    document.getElementById('btnSubOffsetDec').addEventListener('click', () => {
-        const input = document.getElementById('subOffset');
-        input.value = parseInt(input.value || 0) - 100;
-    });
-    
-    document.getElementById('btnSubOffsetInc').addEventListener('click', () => {
-        const input = document.getElementById('subOffset');
-        input.value = parseInt(input.value || 0) + 100;
     });
 
     document.getElementById('btnFetchApi').addEventListener('click', async () => {
@@ -377,6 +457,7 @@
 
     document.getElementById('subtitleSelect').addEventListener('change', (e) => {
         document.getElementById('mediaSubUrl').value = e.target.value;
+        triggerSubOffsetPreview();
     });
 
     // -------------------------------------------------------------------
@@ -398,20 +479,20 @@
         }
     });
 
-    document.getElementById('btnLoadPreview').addEventListener('click', () => {
+    document.getElementById('btnLoadPreview').addEventListener('click', async () => {
         const url = document.getElementById('mediaUrl').value;
         const subUrl = document.getElementById('mediaSubUrl').value;
+        const offsetMs = parseInt(document.getElementById('subOffset').value) || 0;
         
         if(hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
         
-        // Inject VTT Subtitles directly into the video tag for Plyr to recognize
         videoElement.innerHTML = '';
         if (subUrl) {
             const track = document.createElement('track');
             track.kind = 'captions';
             track.label = 'Enabled Subtitle';
             track.srclang = 'en';
-            track.src = subUrl;
+            track.src = await getShiftedSubtitleUrl(subUrl, offsetMs);
             track.default = true;
             videoElement.appendChild(track);
         }
