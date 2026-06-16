@@ -229,7 +229,7 @@
 <body>
 
 <div id="video-container">
-    <video id="mediaPlayer" playsinline poster="player-standby.png"></video>
+    <video id="mediaPlayer" playsinline crossorigin="anonymous" poster="player-standby.png"></video>
 </div>
 
 <div id="ui-layer">
@@ -589,11 +589,63 @@
     }
 
     // --- 6. SUBTITLE SHIFTING LOGIC ---
-    async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+    // async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+    //     try {
+    //         const res = await fetch(vttUrl);
+    //         if (!res.ok) throw new Error("VTT Fetch failed");
+    //         let text = await res.text();
+            
+    //         // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
+    //         const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
+            
+    //         text = text.replace(timeRegex, (match, h, m, s, ms) => {
+    //             let time = parseInt(ms) + (parseInt(s) * 1000) + (parseInt(m) * 60000);
+    //             if (h) time += parseInt(h) * 3600000;
+                
+    //             time += offsetMs;
+    //             if (time < 0) time = 0; // Prevent negative time
+                
+    //             const newH = Math.floor(time / 3600000);
+    //             time %= 3600000;
+    //             const newM = Math.floor(time / 60000);
+    //             time %= 60000;
+    //             const newS = Math.floor(time / 1000);
+    //             const newMs = time % 1000;
+                
+    //             const pad = (num, len) => String(num).padStart(len, '0');
+    //             return `${newH > 0 ? pad(newH, 2) + ':' : (h ? '00:' : '')}${pad(newM, 2)}:${pad(newS, 2)}.${pad(newMs, 3)}`;
+    //         });
+            
+    //         const blob = new Blob([text], { type: 'text/vtt' });
+    //         return URL.createObjectURL(blob);
+    //     } catch (e) {
+    //         console.warn("Failed to shift subtitle, falling back to original URL:", e);
+    //         return vttUrl;
+    //     }
+    // }
+
+    // --- 6. SUBTITLE SHIFTING LOGIC ---
+        async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
         try {
-            const res = await fetch(vttUrl);
-            if (!res.ok) throw new Error("VTT Fetch failed");
+            let res;
+            try {
+                // Attempt standard fetch
+                res = await fetch(vttUrl);
+                if (!res.ok) throw new Error("Network response was not ok");
+            } catch (corsError) {
+                // If CORS blocks it, route through a public proxy
+                console.warn("Direct subtitle fetch blocked by CORS. Using proxy...");
+                res = await fetch(`https://corsproxy.io/?${encodeURIComponent(vttUrl)}`);
+                if (!res.ok) throw new Error("Proxy fetch failed");
+            }
+            
             let text = await res.text();
+            
+            // If no offset is needed, just return the blob directly
+            if (offsetMs === 0) {
+                const blob = new Blob([text], { type: 'text/vtt' });
+                return URL.createObjectURL(blob);
+            }
             
             // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
             const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
@@ -619,8 +671,8 @@
             const blob = new Blob([text], { type: 'text/vtt' });
             return URL.createObjectURL(blob);
         } catch (e) {
-            console.warn("Failed to shift subtitle, falling back to original URL:", e);
-            return vttUrl;
+            console.error("Critical failure fetching subtitles:", e);
+            return vttUrl; // Fallback to raw URL as a last resort
         }
     }
 
