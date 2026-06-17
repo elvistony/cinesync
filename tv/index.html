@@ -689,7 +689,7 @@
         // Catch embedded third-party streams and route to standalone iframe player
         if (url.startsWith("@EMBED@")) {
             const embedUrl = url.replace("@EMBED@", "");
-            window.location.href = `/crosssource/index.html#${encodeURIComponent(embedUrl)}`;
+            window.location.href = `../crosssource/index.html#${encodeURIComponent(embedUrl)}`;
             return;
         }
 
