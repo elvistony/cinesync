@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta  http-equiv="Content-Security-Policy" content="frame-src https://embed.st; navigation-to 'self'">
+    <title>CineSync Embedded Player</title>
+    <style>
+        body, html {
+            margin: 0; 
+            padding: 0;
+            width: 100vw; 
+            height: 100vh;
+            background-color: #000;
+            overflow: hidden;
+        }
+        
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        #error-msg {
+            color: #E50914;
+            font-family: sans-serif;
+            text-align: center;
+            margin-top: 40vh;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h2 id="error-msg">No Stream URL Provided</h2>
+    
+    <iframe id="embedFrame" 
+        title="Embedded Stream" 
+        marginheight="0" 
+        marginwidth="0" 
+        scrolling="no" 
+        allowfullscreen="yes" 
+        allow="encrypted-media; autoplay; fullscreen" 
+        frameborder="0">
+    </iframe>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const hash = window.location.hash.substring(1);
+            const iframe = document.getElementById("embedFrame");
+            const errorMsg = document.getElementById("error-msg");
+
+            if (hash) {
+                // Decode the URL passed from tv.html
+                const targetUrl = decodeURIComponent(hash);
+                iframe.src = targetUrl;
+                
+                // Force focus on the iframe. This allows Android TV WebViews 
+                // to push physical D-pad events down into the cross-origin DOM.
+                iframe.onload = () => {
+                    iframe.focus();
+                };
+                
+                // Backup focus attempt
+                setTimeout(() => iframe.focus(), 500);
+            } else {
+                iframe.style.display = "none";
+                errorMsg.style.display = "block";
+            }
+            
+            // Re-assert focus if the user clicks anywhere in the empty space
+            window.addEventListener('click', () => {
+                iframe.focus();
+            });
+        });
+    </script>
+</body>
+</html>

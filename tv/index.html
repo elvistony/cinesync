@@ -108,6 +108,7 @@
             font-size: 1.4rem;
             display: flex; align-items: center; justify-content: center;
             transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s, opacity 0.2s, color 0.2s;
+            cursor: pointer;
         }
 
         /* CC Active Indicator */
@@ -133,6 +134,7 @@
             border-radius: 3px;
             position: relative;
             transition: transform 0.2s, background-color 0.2s;
+            cursor: pointer;
         }
 
         .progress-fill {
@@ -142,6 +144,7 @@
             background: var(--brand-color);
             border-radius: 3px;
             width: 0%;
+            pointer-events: none;
         }
 
         .progress-thumb {
@@ -154,6 +157,7 @@
             border-radius: 50%;
             box-shadow: var(--focus-glow);
             transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none;
         }
 
         /* --- FOCUS MECHANICS --- */
@@ -226,9 +230,10 @@
             margin-top: 10px;
         }
 
-        ::cue {
+        /* Decreased Subtitle Size */
+        video::cue {
             color: #fff; background: transparent;
-            font-size: 2.2rem; text-shadow: 0 2px 4px #000, 0 0 8px #000;
+            font-size: 0.7em; text-shadow: 0 2px 4px #000, 0 0 8px #000;
         }
     </style>
 </head>
@@ -249,7 +254,7 @@
             <span style="opacity: 0.5;">|</span>
             <span>#<span id="roomCodeDisplay">...</span></span>
             <span style="opacity: 0.5;">|</span>
-            <span>v1.0.2</span>
+            <span>v1.0.3</span>
         </div>
     </div>
 
@@ -312,7 +317,7 @@
     
     roomCodeDisplay.innerText = roomCode || "...";
 
-    // --- 2. GRID FOCUS MANAGEMENT ---
+    // --- 2. GRID FOCUS MANAGEMENT & MOUSE/TOUCH SUPPORT ---
     const focusables = document.querySelectorAll('.focusable');
     let currentFocusIndex = 1; 
     let previousTopRowIndex = 1;
@@ -322,7 +327,6 @@
         if (qrModal.classList.contains('active')) return; 
         focusables[currentFocusIndex].classList.add('tv-focused');
 
-        // Reset virtual scrubbing state if focus leaves the slider line
         if (currentFocusIndex !== 6 && isScrubbing) {
             isScrubbing = false;
         }
@@ -330,8 +334,41 @@
 
     renderFocus();
 
+    uiLayer.addEventListener('click', (e) => {
+        showUI();
+    });
+
+    focusables.forEach((el, index) => {
+        el.addEventListener('mouseenter', () => {
+            if (qrModal.classList.contains('active')) return;
+            currentFocusIndex = index;
+            renderFocus();
+        });
+
+        el.addEventListener('click', (e) => {
+            e.stopPropagation(); 
+            if (qrModal.classList.contains('active')) return;
+            
+            currentFocusIndex = index;
+            renderFocus();
+            
+            if (index === 6) {
+                if (!video.duration) return;
+                const rect = el.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const percent = Math.max(0, Math.min(1, clickX / rect.width));
+                const targetTime = percent * video.duration;
+                
+                video.currentTime = targetTime;
+                emitNetworkCommand('seek', Math.floor(targetTime));
+                showUI();
+            } else {
+                executeFocusAction();
+            }
+        });
+    });
+
     document.addEventListener('keydown', (e) => {
-        // Handle QR Modal Dismissal (Only OK / Enter / Space)
         if (qrModal.classList.contains('active')) {
             e.preventDefault();
             if (e.key === 'Enter' || e.key === ' ') {
@@ -351,14 +388,14 @@
                 if (currentFocusIndex < 5) {
                     currentFocusIndex++;
                 } else if (currentFocusIndex === 6) {
-                    handleScrub(15); // Shift virtual pointer ahead instantly
+                    handleScrub(15); 
                 }
                 break;
             case 'ArrowLeft':
                 if (currentFocusIndex > 0 && currentFocusIndex <= 5) {
                     currentFocusIndex--;
                 } else if (currentFocusIndex === 6) {
-                    handleScrub(-15); // Shift virtual pointer behind instantly
+                    handleScrub(-15); 
                 }
                 break;
             case 'ArrowDown':
@@ -396,21 +433,17 @@
     function handleScrub(seconds) {
         if (!video.duration) return;
         
-        // Lock video updates during active remote holding sessions
         if (!isScrubbing) {
             isScrubbing = true;
             virtualTime = video.currentTime;
         }
 
-        // Bound variables inside valid range constraints
         virtualTime = Math.max(0, Math.min(video.duration, virtualTime + seconds));
         
-        // Direct, instantaneous UI rendering updates without waiting for internal buffers
         const percent = (virtualTime / video.duration) * 100;
         progressFill.style.width = `${percent}%`;
         document.getElementById('currentTime').innerText = formatTime(virtualTime);
 
-        // Debounce window clears out fast triggers to prevent system buffer pipeline lock
         clearTimeout(scrubDebounceTimeout);
         scrubDebounceTimeout = setTimeout(() => {
             if (!isScrubbing) return;
@@ -419,13 +452,12 @@
             lastLocalActionTime = Date.now();
             video.currentTime = Math.floor(virtualTime);
             emitNetworkCommand('seek', Math.floor(virtualTime));
-        }, 400); // 400ms filter block window
+        }, 400); 
     }
 
     function togglePlay() {
         showUI();
         
-        // If a scrub timeout is pending, force it to execute immediately before playing/pausing
         if (isScrubbing) {
             clearTimeout(scrubDebounceTimeout);
             isScrubbing = false;
@@ -435,7 +467,6 @@
 
         lastLocalActionTime = Date.now();
         
-        // Use the visual state of the Play/Pause icon to determine user intent.
         if (playIcon.classList.contains("bi-play-fill")) {
             video.play().then(() => {
                 emitNetworkCommand('play');
@@ -512,7 +543,6 @@
     });
 
     video.addEventListener('timeupdate', () => {
-        // Suspend UI engine timeline adjustments if user is moving slider manually
         if (isScrubbing || !video.duration) return;
         const percent = (video.currentTime / video.duration) * 100;
         progressFill.style.width = `${percent}%`;
@@ -554,12 +584,12 @@
 
         socket.on('disconnect', () => {
             userCountDisplay.innerText = "0";
-            userCountDisplay.style.color = "#E50914"; // Turn red if disconnected
+            userCountDisplay.style.color = "#E50914"; 
         });
 
         socket.on('welcome', (data) => { 
             userCountDisplay.innerText = data.msg?.count || 1;
-            userCountDisplay.style.color = ""; // Reset color
+            userCountDisplay.style.color = ""; 
             if (data.msg?.context) loadMedia(data.msg.context); 
         });
         
@@ -590,50 +620,14 @@
         if (msgType === 'play') video.play().catch(e => console.log(e));
         if (msgType === 'pause') video.pause();
         if (msgType === 'seek') {
-            isScrubbing = false; // Override any active local scrub if a global update breaks in
+            isScrubbing = false; 
             video.currentTime = parseInt(data.msg.payload);
         }
         if (msgType === 'stream') { video.currentTime = 0; video.pause(); }
     }
 
     // --- 6. SUBTITLE SHIFTING LOGIC ---
-    // async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
-    //     try {
-    //         const res = await fetch(vttUrl);
-    //         if (!res.ok) throw new Error("VTT Fetch failed");
-    //         let text = await res.text();
-            
-    //         // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
-    //         const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
-            
-    //         text = text.replace(timeRegex, (match, h, m, s, ms) => {
-    //             let time = parseInt(ms) + (parseInt(s) * 1000) + (parseInt(m) * 60000);
-    //             if (h) time += parseInt(h) * 3600000;
-                
-    //             time += offsetMs;
-    //             if (time < 0) time = 0; // Prevent negative time
-                
-    //             const newH = Math.floor(time / 3600000);
-    //             time %= 3600000;
-    //             const newM = Math.floor(time / 60000);
-    //             time %= 60000;
-    //             const newS = Math.floor(time / 1000);
-    //             const newMs = time % 1000;
-                
-    //             const pad = (num, len) => String(num).padStart(len, '0');
-    //             return `${newH > 0 ? pad(newH, 2) + ':' : (h ? '00:' : '')}${pad(newM, 2)}:${pad(newS, 2)}.${pad(newMs, 3)}`;
-    //         });
-            
-    //         const blob = new Blob([text], { type: 'text/vtt' });
-    //         return URL.createObjectURL(blob);
-    //     } catch (e) {
-    //         console.warn("Failed to shift subtitle, falling back to original URL:", e);
-    //         return vttUrl;
-    //     }
-    // }
-
-    // --- 6. SUBTITLE SHIFTING LOGIC ---
-        async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
+    async function getShiftedSubtitleUrl(vttUrl, offsetMs) {
         try {
             let res;
             try {
@@ -684,10 +678,20 @@
         }
     }
 
-    // --- 7. HLS ENGINE SOURCE CONTROLLER ---
+    // --- 7. HLS ENGINE & CROSS-SOURCE LOGIC ---
     async function loadMedia(context) {
         document.getElementById('movieTitle').innerText = context.title || "Unknown Title";
         document.getElementById('movieDesc').innerText = context.desc || "";
+
+        const url = context.url;
+        if (!url) return;
+
+        // Catch embedded third-party streams and route to standalone iframe player
+        if (url.startsWith("@EMBED@")) {
+            const embedUrl = url.replace("@EMBED@", "");
+            window.location.href = `/crosssource/index.html#${encodeURIComponent(embedUrl)}`;
+            return;
+        }
 
         if (hls) { hls.destroy(); hls = null; }
         video.innerHTML = ''; 
@@ -698,11 +702,7 @@
             track.default = true;
 
             const offsetMs = parseInt(context.subsOffset) || 0;
-            if (offsetMs !== 0) {
-                track.src = await getShiftedSubtitleUrl(context.subs, offsetMs);
-            } else {
-                track.src = context.subs;
-            }
+            track.src = await getShiftedSubtitleUrl(context.subs, offsetMs);
             
             video.appendChild(track);
             track.mode = 'showing';
@@ -716,7 +716,6 @@
             btnCC.style.opacity = '0.3';
         }
 
-        const url = context.url;
         if (url.includes('.m3u8') && Hls.isSupported()) {
             hls = new Hls();
             hls.loadSource(url);
