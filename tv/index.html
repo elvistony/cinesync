@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CineSync TV (Vanilla JS)</title>
+    <title>CineSync TV</title>
     
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -28,6 +28,59 @@
             overflow: hidden;
         }
 
+        /* --- INTRO & WELCOME SCREEN --- */
+        #intro-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background-color: #000;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 1s ease-in-out;
+        }
+
+        #welcome-content {
+            background: rgba(20, 20, 20, 0.95);
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            text-align: center;
+            z-index: 2;
+            border: 1px solid #333;
+            zoom: 1.2;
+        }
+
+        #welcome-content h2 { margin: 0 0 10px 0; color: var(--brand-color); font-weight: 800;}
+        #welcome-content p { font-size: 1.2rem; margin: 10px 0 25px 0; color: #ccc;}
+        #watchNameDisplay { font-size: 1.8rem; color: #fff; font-weight: bold; display: block; margin-top: 5px; }
+        
+        #btnWelcomeOk {
+            width: auto;
+            padding: 12px 50px;
+            border-radius: 8px;
+            margin: 0 auto;
+            font-size: 1.5rem;
+            font-weight: bold;
+            background: var(--brand-color);
+            color: #fff;
+            border: 2px solid transparent;
+            cursor: pointer;
+            box-shadow: var(--focus-glow);
+            outline: 3px solid #fff;
+            outline-offset: 3px;
+        }
+
+        #intro-video {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            display: none; /* Hidden until OK is clicked */
+            z-index: 1;
+        }
+
         /* --- VIDEO LAYER --- */
         #video-container {
             position: absolute;
@@ -42,9 +95,8 @@
         }
 
         video::cue {
-            font-size: 0.7em; /* Change this value to adjust font size */
-            color: white;    /* Change text color */
-            background: rgba(0, 0, 0, 0.7); /* Background color with transparency */
+            color: #fff; background: transparent;
+            font-size: 0.7em; text-shadow: 0 2px 4px #000, 0 0 8px #000;
         }
 
         /* --- UI OVERLAY LAYER --- */
@@ -111,7 +163,6 @@
             cursor: pointer;
         }
 
-        /* CC Active Indicator */
         .tv-btn.active {
             background: rgba(255, 255, 255, 0.95) !important;
             color: var(--bg-color) !important;
@@ -213,31 +264,21 @@
             margin-bottom: 20px;
         }
 
-        #qr-canvas img {
-            display: block;
-        }
-
-        .qr-text {
-            font-size: 1.4rem;
-            font-weight: 600;
-            text-align: center;
-            max-width: 500px;
-        }
-
-        .qr-subtext {
-            font-size: 1rem;
-            opacity: 0.6;
-            margin-top: 10px;
-        }
-
-        /* Decreased Subtitle Size */
-        video::cue {
-            color: #fff; background: transparent;
-            font-size: 0.7em; text-shadow: 0 2px 4px #000, 0 0 8px #000;
-        }
+        #qr-canvas img { display: block; }
+        .qr-text { font-size: 1.4rem; font-weight: 600; text-align: center; max-width: 500px; }
+        .qr-subtext { font-size: 1rem; opacity: 0.6; margin-top: 10px; }
     </style>
 </head>
 <body>
+
+<div id="intro-screen">
+    <div id="welcome-content">
+        <h2>Welcome</h2>
+        <p>Your watch name is:<br><span id="watchNameDisplay">blue-glaring-panda</span></p>
+        <button id="btnWelcomeOk">OK</button>
+    </div>
+    <video id="intro-video" src="cinesync.mov" playsinline></video>
+</div>
 
 <div id="video-container">
     <video id="mediaPlayer" playsinline crossorigin="anonymous" poster="player-standby.png"></video>
@@ -254,7 +295,7 @@
             <span style="opacity: 0.5;">|</span>
             <span>#<span id="roomCodeDisplay">...</span></span>
             <span style="opacity: 0.5;">|</span>
-            <span>v1.0.4</span>
+            <span>v1.0.5</span>
         </div>
     </div>
 
@@ -288,6 +329,54 @@
 </div>
 
 <script>
+    // --- 0. INTRO REVEAL LOGIC ---
+    let isWelcomeScreen = true; // Traps D-pad focus until OK is pressed
+    
+    const introScreen = document.getElementById('intro-screen');
+    const welcomeContent = document.getElementById('welcome-content');
+    const introVideo = document.getElementById('intro-video');
+    const btnWelcomeOk = document.getElementById('btnWelcomeOk');
+    const watchNameDisplay = document.getElementById('watchNameDisplay');
+
+    // Generate a random watch name
+    const adjectives = ['blue', 'glaring', 'sleepy', 'rapid', 'quiet', 'fierce', 'gentle', 'bold', 'lucky', 'clever'];
+    const animals = ['panda', 'fox', 'tiger', 'bear', 'wolf', 'eagle', 'dolphin', 'owl', 'hawk', 'koala'];
+    const randomAdjective1 = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const randomAdjective2 = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const randomAnimal = animals[Math.floor(Math.random() * animals.length)];
+    watchNameDisplay.innerText = `${randomAdjective1}-${randomAdjective2}-${randomAnimal}`;
+
+    // Handle OK Click (User Gesture unlocks Audio)
+    btnWelcomeOk.addEventListener('click', startIntroSequence);
+
+    function startIntroSequence() {
+        isWelcomeScreen = false;
+        welcomeContent.style.display = 'none';
+        introVideo.style.display = 'block';
+        
+        // Safety fallback: if video fails to play, clear screen after 8s
+        let introFallbackTimer = setTimeout(dismissIntro, 8000);
+
+        introVideo.play().catch(e => {
+            console.warn("Playback blocked or failed:", e);
+            dismissIntro(); 
+        });
+
+        introVideo.onended = () => {
+            clearTimeout(introFallbackTimer);
+            dismissIntro();
+        };
+    }
+
+    function dismissIntro() {
+        introScreen.style.opacity = '0';
+        setTimeout(() => {
+            introScreen.style.display = 'none';
+            // Start listening to regular UI focus
+            renderFocus();
+        }, 1000);
+    }
+
     // --- 1. CORE PROPERTIES ---
     const SOCKET_URL = "https://socket.elvistony.dev";
     let socket = null;
@@ -323,6 +412,8 @@
     let previousTopRowIndex = 1;
 
     function renderFocus() {
+        if (isWelcomeScreen) return; // Prevent focus rings from showing behind the welcome modal
+
         focusables.forEach(el => el.classList.remove('tv-focused'));
         if (qrModal.classList.contains('active')) return; 
         focusables[currentFocusIndex].classList.add('tv-focused');
@@ -332,22 +423,20 @@
         }
     }
 
-    renderFocus();
-
     uiLayer.addEventListener('click', (e) => {
-        showUI();
+        if (!isWelcomeScreen) showUI();
     });
 
     focusables.forEach((el, index) => {
         el.addEventListener('mouseenter', () => {
-            if (qrModal.classList.contains('active')) return;
+            if (qrModal.classList.contains('active') || isWelcomeScreen) return;
             currentFocusIndex = index;
             renderFocus();
         });
 
         el.addEventListener('click', (e) => {
             e.stopPropagation(); 
-            if (qrModal.classList.contains('active')) return;
+            if (qrModal.classList.contains('active') || isWelcomeScreen) return;
             
             currentFocusIndex = index;
             renderFocus();
@@ -369,6 +458,15 @@
     });
 
     document.addEventListener('keydown', (e) => {
+        // Trap focus if we are on the welcome screen
+        if (isWelcomeScreen) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                startIntroSequence();
+            }
+            return;
+        }
+
         if (qrModal.classList.contains('active')) {
             e.preventDefault();
             if (e.key === 'Enter' || e.key === ' ') {
@@ -555,7 +653,7 @@
 
     let uiTimeout;
     function showUI() {
-        if (qrModal.classList.contains('active')) return;
+        if (qrModal.classList.contains('active') || isWelcomeScreen) return;
         uiLayer.style.opacity = '1';
         clearTimeout(uiTimeout);
         if (!video.paused) {
@@ -631,11 +729,9 @@
         try {
             let res;
             try {
-                // Attempt standard fetch
                 res = await fetch(vttUrl);
                 if (!res.ok) throw new Error("Network response was not ok");
             } catch (corsError) {
-                // If CORS blocks it, route through a public proxy
                 console.warn("Direct subtitle fetch blocked by CORS. Using proxy...");
                 res = await fetch(`https://corsproxy.io/?${encodeURIComponent(vttUrl)}`);
                 if (!res.ok) throw new Error("Proxy fetch failed");
@@ -643,13 +739,11 @@
             
             let text = await res.text();
             
-            // If no offset is needed, just return the blob directly
             if (offsetMs === 0) {
                 const blob = new Blob([text], { type: 'text/vtt' });
                 return URL.createObjectURL(blob);
             }
             
-            // Regex to match standard VTT timestamps (HH:MM:SS.mmm or MM:SS.mmm)
             const timeRegex = /(?:(\d{2,}):)?(\d{2}):(\d{2})\.(\d{3})/g;
             
             text = text.replace(timeRegex, (match, h, m, s, ms) => {
@@ -657,7 +751,7 @@
                 if (h) time += parseInt(h) * 3600000;
                 
                 time += offsetMs;
-                if (time < 0) time = 0; // Prevent negative time
+                if (time < 0) time = 0;
                 
                 const newH = Math.floor(time / 3600000);
                 time %= 3600000;
@@ -674,7 +768,7 @@
             return URL.createObjectURL(blob);
         } catch (e) {
             console.error("Critical failure fetching subtitles:", e);
-            return vttUrl; // Fallback to raw URL as a last resort
+            return vttUrl; 
         }
     }
 
@@ -686,7 +780,14 @@
         const url = context.url;
         if (!url) return;
 
-        // Catch embedded third-party streams and route to standalone iframe player
+        // Redirect Mode
+        if (url.startsWith("@REDIRECT@")) {
+            const redirectUrl = url.replace("@REDIRECT@", "");
+            window.location.replace(redirectUrl);
+            return;
+        }
+
+        // Embedded Third-Party Streams Mode
         if (url.startsWith("@EMBED@")) {
             const embedUrl = url.replace("@EMBED@", "");
             window.location.href = `../crosssource/index.html#${encodeURIComponent(embedUrl)}`;
@@ -707,11 +808,9 @@
             video.appendChild(track);
             track.mode = 'showing';
             
-            // Set initial UI state for CC Button (ON / ACTIVE)
             btnCC.classList.add('active');
             btnCC.style.opacity = '1';
         } else {
-            // Set initial UI state for CC Button (DISABLED/OFF)
             btnCC.classList.remove('active');
             btnCC.style.opacity = '0.3';
         }
